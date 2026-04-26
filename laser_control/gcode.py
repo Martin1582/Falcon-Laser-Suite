@@ -8,12 +8,19 @@ FALCON_MAX_WIDTH_MM = 400.0
 FALCON_MAX_HEIGHT_MM = 415.0
 MOTION_COMMAND_RE = re.compile(r"^G0*[123](?:\D|$)")
 LASER_POWER_WORD_RE = re.compile(r"\sS[-+]?(?:\d+(?:\.\d+)?|\.\d+)\b", re.IGNORECASE)
+ENGRAVE_MODE = "gravieren"
+CUT_MODE = "cutten"
+
+
+def laser_mode_command(operation_mode: str) -> str:
+    return "M3 ; constant laser power" if operation_mode == CUT_MODE else "M4 ; dynamic laser power"
 
 
 def build_rectangle_frame_gcode(
     width_mm: float,
     height_mm: float,
     profile: MaterialProfile,
+    operation_mode: str = ENGRAVE_MODE,
 ) -> str:
     safe_width = max(1.0, width_mm)
     safe_height = max(1.0, height_mm)
@@ -24,7 +31,7 @@ def build_rectangle_frame_gcode(
         "G21 ; millimeters",
         "G90 ; absolute positioning",
         "M5 ; laser off",
-        "M4 ; dynamic laser power",
+        laser_mode_command(operation_mode),
         f"G0 X0 Y0 F{profile.speed_mm_min}",
         f"G1 X{safe_width:.2f} Y0 S{laser_power} F{profile.speed_mm_min}",
         f"G1 X{safe_width:.2f} Y{safe_height:.2f}",
@@ -99,7 +106,11 @@ def build_safe_frame_gcode(width_mm: float, height_mm: float, feed_mm_min: int =
     ]
 
 
-def build_polyline_gcode(paths: list[Polyline], profile: MaterialProfile) -> str:
+def build_polyline_gcode(
+    paths: list[Polyline],
+    profile: MaterialProfile,
+    operation_mode: str = ENGRAVE_MODE,
+) -> str:
     if not paths:
         raise ValueError("Keine Pfade fuer G-Code vorhanden.")
 
@@ -109,7 +120,7 @@ def build_polyline_gcode(paths: list[Polyline], profile: MaterialProfile) -> str
         "G21 ; millimeters",
         "G90 ; absolute positioning",
         "M5 ; laser off",
-        "M4 ; dynamic laser power",
+        laser_mode_command(operation_mode),
     ]
 
     for pass_index in range(max(1, profile.passes)):
@@ -120,7 +131,7 @@ def build_polyline_gcode(paths: list[Polyline], profile: MaterialProfile) -> str
             start_x, start_y = path[0]
             lines.append("M5")
             lines.append(f"G0 X{start_x:.2f} Y{start_y:.2f} F{profile.speed_mm_min}")
-            lines.append("M4")
+            lines.append(laser_mode_command(operation_mode))
             for x, y in path[1:]:
                 lines.append(f"G1 X{x:.2f} Y{y:.2f} S{laser_power} F{profile.speed_mm_min}")
     lines.append("M5 ; laser off")

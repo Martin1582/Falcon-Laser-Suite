@@ -1,10 +1,12 @@
 import pytest
 
 from laser_control.gcode import (
+    CUT_MODE,
     FALCON_MAX_HEIGHT_MM,
     FALCON_MAX_WIDTH_MM,
     build_dry_run_gcode,
     build_polyline_gcode,
+    build_rectangle_frame_gcode,
     prepare_job_gcode,
     validate_falcon_work_area,
 )
@@ -43,9 +45,29 @@ def test_build_polyline_gcode_reenables_laser_after_travel_m5() -> None:
     first_path_start = lines.index("G0 X0.00 Y0.00 F1200")
     second_path_start = lines.index("G0 X20.00 Y0.00 F1200")
     assert lines[first_path_start - 1] == "M5"
-    assert lines[first_path_start + 1] == "M4"
+    assert lines[first_path_start + 1].startswith("M4")
     assert lines[second_path_start - 1] == "M5"
-    assert lines[second_path_start + 1] == "M4"
+    assert lines[second_path_start + 1].startswith("M4")
+
+
+def test_build_polyline_gcode_uses_m3_in_cut_mode() -> None:
+    profile = MaterialProfile(name="Cut", power_percent=70, speed_mm_min=900, passes=1)
+    paths = [[(0.0, 0.0), (15.0, 0.0)]]
+
+    lines = build_polyline_gcode(paths, profile, CUT_MODE).splitlines()
+
+    assert "M3 ; constant laser power" in lines
+    assert "M4 ; dynamic laser power" not in lines
+
+
+def test_build_rectangle_frame_gcode_uses_mode_specific_laser_command() -> None:
+    profile = MaterialProfile(name="Default", power_percent=40, speed_mm_min=1000, passes=1)
+
+    engrave_lines = build_rectangle_frame_gcode(50.0, 30.0, profile).splitlines()
+    cut_lines = build_rectangle_frame_gcode(50.0, 30.0, profile, CUT_MODE).splitlines()
+
+    assert "M4 ; dynamic laser power" in engrave_lines
+    assert "M3 ; constant laser power" in cut_lines
 
 
 def test_build_dry_run_gcode_forces_laser_off_and_strips_power() -> None:

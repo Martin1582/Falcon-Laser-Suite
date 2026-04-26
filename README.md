@@ -47,13 +47,20 @@ Run tests:
 
 ## Recommended Workflow
 
-Before every real engraving job:
+Before every real engraving or cutting job:
 
 1. connect and home the machine
 2. run **Rahmen fahren** or **Dry Run** to verify path and positioning
-3. start the real job only after confirming alignment and safety
+3. run a short low-power trial on scrap material
+4. start the real job only after confirming alignment and safety
 
 `Dry Run` sends motion-only G-code and forces laser off (`M5`).
+
+## Operation Modes
+
+- **Gravieren**: uses `M4` (dynamic laser power), suitable for engraving.
+- **Cutten**: uses `M3` (constant laser power), suitable for cutting passes.
+- Mode selection affects generated preview G-code for all current job types.
 
 ## Desktop Shortcut
 
