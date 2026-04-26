@@ -1,0 +1,17 @@
+{
+  "materials": [
+    {
+      "name": "Sperrholz 18x18",
+      "width_mm": 180.0,
+      "height_mm": 180.0,
+      "point_a": [
+        0.0,
+        0.0
+      ],
+      "point_b": [
+        180.0,
+        180.0
+      ]
+    }
+  ]
+}
