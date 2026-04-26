@@ -3,7 +3,14 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from laser_control.gcode import build_dry_run_gcode, build_polyline_gcode, build_rectangle_frame_gcode, prepare_job_gcode
+from laser_control.gcode import (
+    CUT_MODE,
+    ENGRAVE_MODE,
+    build_dry_run_gcode,
+    build_polyline_gcode,
+    build_rectangle_frame_gcode,
+    prepare_job_gcode,
+)
 from laser_control.laser import SimulatedLaserController
 from laser_control.material_db import delete_material, find_material, load_materials, upsert_material
 from laser_control.models import MaterialProfile
@@ -27,6 +34,7 @@ class LaserControlApp(tk.Tk):
         self.power_percent = tk.IntVar(value=DEFAULT_PROFILES[0].power_percent)
         self.speed_mm_min = tk.IntVar(value=DEFAULT_PROFILES[0].speed_mm_min)
         self.passes = tk.IntVar(value=DEFAULT_PROFILES[0].passes)
+        self.operation_mode = tk.StringVar(value=ENGRAVE_MODE)
         self.connection_mode = tk.StringVar(value="Simulator")
         self.serial_port = tk.StringVar()
         self.selected_serial_port = ""
@@ -183,6 +191,16 @@ class LaserControlApp(tk.Tk):
         ttk.Separator(parent).pack(fill="x", pady=16)
 
         ttk.Label(parent, text="Job", font=("Segoe UI", 12, "bold")).pack(anchor="w")
+        ttk.Label(parent, text="Modus").pack(anchor="w", pady=(8, 0))
+        mode_select = ttk.Combobox(
+            parent,
+            textvariable=self.operation_mode,
+            values=[ENGRAVE_MODE, CUT_MODE],
+            state="readonly",
+            width=22,
+        )
+        mode_select.pack(fill="x", pady=(4, 4))
+        mode_select.bind("<<ComboboxSelected>>", lambda _: self._settings_changed())
         ttk.Button(parent, text="Rahmen fahren", command=self._frame_job).pack(fill="x", pady=(8, 4))
         ttk.Button(parent, text="Dry Run", command=self._dry_run_job).pack(fill="x", pady=4)
         ttk.Button(parent, text="Start", command=self._start_job).pack(fill="x", pady=4)
@@ -377,12 +395,14 @@ class LaserControlApp(tk.Tk):
             gcode = self.gcode.get()
         commands = prepare_job_gcode(gcode, width, height)
         controller_name = controller.__class__.__name__
+        mode_label = self._operation_mode_label()
 
         if self.connection_mode.get() != "GRBL ueber USB":
             confirmed = messagebox.askyesno(
                 "Simulator-Modus",
                 "Die App ist im Simulator-Modus.\n\n"
                 "Der Job wird nicht an den Laser gesendet.\n"
+                f"Auswahl: {mode_label}\n"
                 "Soll die Simulation gestartet werden?",
             )
             if not confirmed:
@@ -395,6 +415,7 @@ class LaserControlApp(tk.Tk):
                 "Laserjob starten",
                 "Laserjob wirklich starten?\n\n"
                 "Modus: GRBL ueber USB\n"
+                f"Operation: {mode_label}\n"
                 f"Controller: {controller_name}\n"
                 f"Port: {self.serial_port.get()}\n"
                 f"Arbeitsbereich: {width:.0f} x {height:.0f} mm\n"
@@ -408,7 +429,7 @@ class LaserControlApp(tk.Tk):
                 self.log("Jobstart abgebrochen.")
                 return
 
-        self.log(f"Start-Controller: {controller_name}")
+        self.log(f"Start-Controller: {controller_name} ({mode_label})")
 
         def start() -> None:
             try:
@@ -430,12 +451,14 @@ class LaserControlApp(tk.Tk):
         dry_run_gcode = build_dry_run_gcode(gcode, width, height)
         command_count = len(dry_run_gcode.splitlines())
         controller_name = controller.__class__.__name__
+        mode_label = self._operation_mode_label()
 
         if self.connection_mode.get() != "GRBL ueber USB":
             confirmed = messagebox.askyesno(
                 "Simulator Dry Run",
                 "Dry Run startet im Simulator.\n\n"
                 "Es wird nur Bewegung simuliert, ohne Laser.\n"
+                f"Auswahl: {mode_label}\n"
                 "Soll die Simulation gestartet werden?",
             )
             if not confirmed:
@@ -448,6 +471,7 @@ class LaserControlApp(tk.Tk):
                 "Dry Run starten",
                 "Dry Run wirklich starten?\n\n"
                 "Modus: GRBL ueber USB\n"
+                f"Operation: {mode_label}\n"
                 f"Controller: {controller_name}\n"
                 f"Port: {self.serial_port.get()}\n"
                 f"Arbeitsbereich: {width:.0f} x {height:.0f} mm\n"
@@ -458,7 +482,7 @@ class LaserControlApp(tk.Tk):
                 self.log("Dry Run abgebrochen.")
                 return
 
-        self.log(f"Dry Run Start-Controller: {controller_name}")
+        self.log(f"Dry Run Start-Controller: {controller_name} ({mode_label})")
 
         def start_dry_run() -> None:
             try:
@@ -499,14 +523,23 @@ class LaserControlApp(tk.Tk):
 
     def _refresh_gcode(self) -> None:
         profile = self._selected_profile()
+        operation_mode = self.operation_mode.get()
         if self.imported_paths:
-            code = build_polyline_gcode(self.imported_paths, profile)
+            code = build_polyline_gcode(self.imported_paths, profile, operation_mode)
         else:
-            code = build_rectangle_frame_gcode(self._dimension(self.work_width), self._dimension(self.work_height), profile)
+            code = build_rectangle_frame_gcode(
+                self._dimension(self.work_width),
+                self._dimension(self.work_height),
+                profile,
+                operation_mode,
+            )
         self.gcode.set(code)
         if hasattr(self, "gcode_text"):
             self.gcode_text.delete("1.0", "end")
             self.gcode_text.insert("1.0", code)
+
+    def _operation_mode_label(self) -> str:
+        return "Cutten (M3 konstant)" if self.operation_mode.get() == CUT_MODE else "Gravieren (M4 dynamisch)"
 
     def _import_svg(self) -> None:
         path = filedialog.askopenfilename(
