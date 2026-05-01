@@ -1,19 +1,34 @@
 import json
+import os
 from pathlib import Path
 
 
-MATERIAL_DB_PATH = Path("materials.json")
+LEGACY_MATERIAL_DB_PATH = Path(__file__).resolve().parent.parent / "materials.json"
+
+
+def material_db_path() -> Path:
+    override = os.environ.get("LASER_CONTROL_MATERIAL_DB")
+    if override:
+        return Path(override)
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        return Path(appdata) / "Laser Control" / "materials.json"
+    return LEGACY_MATERIAL_DB_PATH
 
 
 def load_materials() -> list[dict]:
-    if not MATERIAL_DB_PATH.exists():
+    path = material_db_path()
+    source_path = path if path.exists() else LEGACY_MATERIAL_DB_PATH
+    if not source_path.exists():
         return []
-    data = json.loads(MATERIAL_DB_PATH.read_text(encoding="utf-8"))
+    data = json.loads(source_path.read_text(encoding="utf-8"))
     return data.get("materials", [])
 
 
 def save_materials(materials: list[dict]) -> None:
-    MATERIAL_DB_PATH.write_text(json.dumps({"materials": materials}, indent=2), encoding="utf-8")
+    path = material_db_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"materials": materials}, indent=2), encoding="utf-8")
 
 
 def upsert_material(record: dict) -> list[dict]:

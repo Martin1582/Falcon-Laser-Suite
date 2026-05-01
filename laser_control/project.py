@@ -4,7 +4,7 @@ from pathlib import Path
 from laser_control.models import MaterialProfile
 
 
-PROJECT_VERSION = 1
+PROJECT_VERSION = 2
 
 
 def project_to_dict(
@@ -16,6 +16,7 @@ def project_to_dict(
     imported_file: str | None = None,
     material_measurement: dict | None = None,
     svg_placement: dict | None = None,
+    operation_mode: str | None = None,
 ) -> dict:
     return {
         "version": PROJECT_VERSION,
@@ -34,6 +35,7 @@ def project_to_dict(
         "imported_file": imported_file,
         "material_measurement": material_measurement,
         "svg_placement": svg_placement,
+        "operation_mode": operation_mode,
     }
 
 
@@ -43,6 +45,7 @@ def save_project(path: str, data: dict) -> None:
 
 def load_project(path: str) -> dict:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
-    if data.get("version") != PROJECT_VERSION:
+    if data.get("version") not in (1, PROJECT_VERSION):
         raise ValueError("Nicht unterstuetzte Projektversion.")
+    data.setdefault("operation_mode", None)
     return data

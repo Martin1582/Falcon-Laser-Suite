@@ -14,10 +14,11 @@ from laser_control.gcode import (
 from laser_control.laser import SimulatedLaserController
 from laser_control.material_db import delete_material, find_material, load_materials, upsert_material
 from laser_control.models import MaterialProfile
-from laser_control.profiles import DEFAULT_PROFILES
+from laser_control.profiles import DEFAULT_CUT_PROFILES, DEFAULT_PROFILES
 from laser_control.project import load_project, project_to_dict, save_project
 from laser_control.serial_grbl import GrblSerialController, list_serial_ports, serial_support_available
 from laser_control.svg_import import fit_paths_to_area, import_svg, scale_paths_to_width
+from laser_control.workflow import build_cut_mode_warnings, derive_cut_profile_from_engrave
 
 
 class LaserControlApp(tk.Tk):
@@ -61,6 +62,7 @@ class LaserControlApp(tk.Tk):
         self.material_db_selection = tk.StringVar(value="")
         self.material_db_records = load_materials()
         self.material_profiles = [MaterialProfile(item.name, item.power_percent, item.speed_mm_min, item.passes) for item in DEFAULT_PROFILES]
+        self.mode_profiles = {ENGRAVE_MODE: {}, CUT_MODE: {}}
         self.current_project_path = None
         self.ui_queue = queue.Queue()
         self.worker_busy = False
@@ -69,6 +71,8 @@ class LaserControlApp(tk.Tk):
         self.active_connection_mode = self.connection_mode.get()
 
         self._build_layout()
+        self._initialize_mode_profiles()
+        self._apply_mode_profile_to_controls()
         self._refresh_gcode()
         self._draw_preview()
         self.after(100, self._poll_worker_events)
@@ -200,7 +204,7 @@ class LaserControlApp(tk.Tk):
             width=22,
         )
         mode_select.pack(fill="x", pady=(4, 4))
-        mode_select.bind("<<ComboboxSelected>>", lambda _: self._settings_changed())
+        mode_select.bind("<<ComboboxSelected>>", lambda _: self._on_operation_mode_changed())
         ttk.Button(parent, text="Rahmen fahren", command=self._frame_job).pack(fill="x", pady=(8, 4))
         ttk.Button(parent, text="Dry Run", command=self._dry_run_job).pack(fill="x", pady=4)
         ttk.Button(parent, text="Start", command=self._start_job).pack(fill="x", pady=4)
@@ -298,17 +302,14 @@ class LaserControlApp(tk.Tk):
         self._draw_preview()
 
     def _profile_selected(self) -> None:
-        profile = self._selected_profile()
-        self.power_percent.set(profile.power_percent)
-        self.speed_mm_min.set(profile.speed_mm_min)
-        self.passes.set(profile.passes)
+        self._ensure_profile_modes(self.profile_name.get())
+        self._apply_mode_profile_to_controls()
         self._settings_changed()
 
     def _material_settings_changed(self) -> None:
         profile = self._selected_profile()
-        profile.power_percent = self._int_value(self.power_percent, profile.power_percent)
-        profile.speed_mm_min = self._int_value(self.speed_mm_min, profile.speed_mm_min)
-        profile.passes = self._int_value(self.passes, profile.passes)
+        self.mode_profiles[self.operation_mode.get()][profile.name] = profile
+        self._upsert_profile(profile)
         self._settings_changed()
 
     def _switch_controller(self) -> None:
@@ -393,9 +394,15 @@ class LaserControlApp(tk.Tk):
             self.gcode.set(gcode)
         else:
             gcode = self.gcode.get()
-        commands = prepare_job_gcode(gcode, width, height)
+        try:
+            commands = prepare_job_gcode(gcode, width, height)
+        except ValueError as exc:
+            self.log(str(exc))
+            messagebox.showerror("G-Code ungueltig", str(exc))
+            return
         controller_name = controller.__class__.__name__
         mode_label = self._operation_mode_label()
+        mode_laser = "M3 konstant" if self.operation_mode.get() == CUT_MODE else "M4 dynamisch"
 
         if self.connection_mode.get() != "GRBL ueber USB":
             confirmed = messagebox.askyesno(
@@ -403,6 +410,10 @@ class LaserControlApp(tk.Tk):
                 "Die App ist im Simulator-Modus.\n\n"
                 "Der Job wird nicht an den Laser gesendet.\n"
                 f"Auswahl: {mode_label}\n"
+                f"Laser-Modus: {mode_laser}\n"
+                f"Leistung: {profile.power_percent}%\n"
+                f"Geschwindigkeit: {profile.speed_mm_min} mm/min\n"
+                f"Durchgaenge: {profile.passes}\n"
                 "Soll die Simulation gestartet werden?",
             )
             if not confirmed:
@@ -411,11 +422,25 @@ class LaserControlApp(tk.Tk):
         else:
             if not self._hardware_preflight_ok(controller):
                 return
+            if self.operation_mode.get() == CUT_MODE:
+                warnings = build_cut_mode_warnings(profile.power_percent, profile.speed_mm_min, profile.passes)
+                if warnings:
+                    warning_text = "\n".join(f"- {item}" for item in warnings)
+                    proceed = messagebox.askyesno(
+                        "Cut-Warnung",
+                        "Cut-Parameter sind aggressiv:\n\n"
+                        f"{warning_text}\n\n"
+                        "Nur fortsetzen, wenn Material und Fokus sicher vorbereitet sind.",
+                    )
+                    if not proceed:
+                        self.log("Jobstart wegen Cut-Warnung abgebrochen.")
+                        return
             confirmed = messagebox.askyesno(
                 "Laserjob starten",
                 "Laserjob wirklich starten?\n\n"
                 "Modus: GRBL ueber USB\n"
                 f"Operation: {mode_label}\n"
+                f"Laser-Modus: {mode_laser}\n"
                 f"Controller: {controller_name}\n"
                 f"Port: {self.serial_port.get()}\n"
                 f"Arbeitsbereich: {width:.0f} x {height:.0f} mm\n"
@@ -448,7 +473,12 @@ class LaserControlApp(tk.Tk):
             self.gcode.set(gcode)
         else:
             gcode = self.gcode.get()
-        dry_run_gcode = build_dry_run_gcode(gcode, width, height)
+        try:
+            dry_run_gcode = build_dry_run_gcode(gcode, width, height)
+        except ValueError as exc:
+            self.log(str(exc))
+            messagebox.showerror("Dry Run nicht moeglich", str(exc))
+            return
         command_count = len(dry_run_gcode.splitlines())
         controller_name = controller.__class__.__name__
         mode_label = self._operation_mode_label()
@@ -541,6 +571,48 @@ class LaserControlApp(tk.Tk):
     def _operation_mode_label(self) -> str:
         return "Cutten (M3 konstant)" if self.operation_mode.get() == CUT_MODE else "Gravieren (M4 dynamisch)"
 
+    def _on_operation_mode_changed(self) -> None:
+        self._apply_mode_profile_to_controls()
+        self._settings_changed()
+
+    def _initialize_mode_profiles(self) -> None:
+        for profile in self.material_profiles:
+            self.mode_profiles[ENGRAVE_MODE][profile.name] = MaterialProfile(
+                profile.name,
+                profile.power_percent,
+                profile.speed_mm_min,
+                profile.passes,
+            )
+            self.mode_profiles[CUT_MODE][profile.name] = DEFAULT_CUT_PROFILES.get(
+                profile.name,
+                derive_cut_profile_from_engrave(profile),
+            )
+
+    def _ensure_profile_modes(self, profile_name: str) -> None:
+        if profile_name in self.mode_profiles[ENGRAVE_MODE] and profile_name in self.mode_profiles[CUT_MODE]:
+            return
+        base_profile = next((item for item in self.material_profiles if item.name == profile_name), None)
+        if base_profile is None:
+            base_profile = MaterialProfile(profile_name, 50, 1000, 1)
+        self.mode_profiles[ENGRAVE_MODE][profile_name] = MaterialProfile(
+            base_profile.name,
+            base_profile.power_percent,
+            base_profile.speed_mm_min,
+            base_profile.passes,
+        )
+        self.mode_profiles[CUT_MODE][profile_name] = DEFAULT_CUT_PROFILES.get(
+            profile_name,
+            derive_cut_profile_from_engrave(base_profile),
+        )
+
+    def _apply_mode_profile_to_controls(self) -> None:
+        selected_name = self.profile_name.get()
+        self._ensure_profile_modes(selected_name)
+        mode_profile = self.mode_profiles[self.operation_mode.get()][selected_name]
+        self.power_percent.set(mode_profile.power_percent)
+        self.speed_mm_min.set(mode_profile.speed_mm_min)
+        self.passes.set(mode_profile.passes)
+
     def _import_svg(self) -> None:
         path = filedialog.askopenfilename(
             title="SVG importieren",
@@ -610,6 +682,13 @@ class LaserControlApp(tk.Tk):
         self.power_percent.set(profile.power_percent)
         self.speed_mm_min.set(profile.speed_mm_min)
         self.passes.set(profile.passes)
+        self._ensure_profile_modes(profile.name)
+        self.mode_profiles[self.operation_mode.get()][profile.name] = MaterialProfile(
+            profile.name,
+            profile.power_percent,
+            profile.speed_mm_min,
+            profile.passes,
+        )
         self.current_project_path = path
 
         loaded_gcode = data.get("gcode", "")
@@ -671,7 +750,12 @@ class LaserControlApp(tk.Tk):
 
     def _selected_profile(self) -> MaterialProfile:
         selected = self.profile_name.get()
-        return next(profile for profile in self.material_profiles if profile.name == selected)
+        return MaterialProfile(
+            selected,
+            self._int_value(self.power_percent, 0),
+            self._int_value(self.speed_mm_min, 1000),
+            self._int_value(self.passes, 1),
+        )
 
     def _upsert_profile(self, profile: MaterialProfile) -> None:
         for index, existing in enumerate(self.material_profiles):
@@ -680,6 +764,8 @@ class LaserControlApp(tk.Tk):
                 break
         else:
             self.material_profiles.append(profile)
+        self._ensure_profile_modes(profile.name)
+        self.mode_profiles[self.operation_mode.get()][profile.name] = profile
         if hasattr(self, "profile_combo"):
             self.profile_combo.configure(values=[item.name for item in self.material_profiles])
 

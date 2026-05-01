@@ -15,7 +15,9 @@ except ImportError:  # pragma: no cover - depends on local installation
 
 LogFn = Callable[[str], None]
 ProgressFn = Callable[[str, int, int], None]
-POSITION_RE = re.compile(r"[MW]Pos:([-+]?\d+(?:\.\d+)?),([-+]?\d+(?:\.\d+)?),[-+]?\d+(?:\.\d+)?")
+NUMBER_PATTERN = r"[-+]?(?:\d+(?:\.\d+)?|\.\d+)"
+POSITION_RE = re.compile(rf"[MW]Pos:({NUMBER_PATTERN}),({NUMBER_PATTERN}),{NUMBER_PATTERN}")
+STATUS_RE = re.compile(r"<([^|>]+)")
 
 
 def list_serial_ports() -> list[str]:
@@ -87,6 +89,7 @@ class GrblSerialController:
             self._log("Controller ist im Hold-Zustand. Mit Fortsetzen (~) oder Stop/Reset fortfahren.")
         else:
             self.send_command("M5")
+        self._update_state_from_status(handshake)
         self._emit_progress("Bereit", 1, 1)
 
     def disconnect(self, log_message: bool = True) -> None:
@@ -136,8 +139,11 @@ class GrblSerialController:
         try:
             status_before = self._query_status_text()
             if status_before:
+                self._update_state_from_status(status_before)
                 self._log("Status vor Jobstart:")
                 self._log_response(status_before)
+                if self.state.alarm:
+                    raise RuntimeError("Controller ist im Alarm-Zustand. Bitte Ursache beheben und erneut homen.")
 
             for index, command in enumerate(commands, start=1):
                 self._emit_progress("Job laeuft", index - 1, len(commands))
@@ -147,12 +153,14 @@ class GrblSerialController:
                 if index == 1 or index == min(5, len(commands)):
                     status = self._query_status_text()
                     if status:
+                        self._update_state_from_status(status)
                         self._log(f"Status nach Zeile {index}:")
                         self._log_response(status)
 
             self._wait_until_idle(timeout_seconds=120.0)
             final_status = self._query_status_text()
             if final_status:
+                self._update_state_from_status(final_status)
                 self._log("Status nach Jobende:")
                 self._log_response(final_status)
             self._log("Hardware-Job abgeschlossen.")
@@ -194,6 +202,7 @@ class GrblSerialController:
         self._require_connected()
         response = self._query_status_text()
         if response:
+            self._update_state_from_status(response)
             self._log_response(response)
         else:
             self._log("Keine Statusantwort erhalten.")
@@ -201,6 +210,7 @@ class GrblSerialController:
     def current_position(self) -> tuple[float, float]:
         self._require_connected()
         response = self._query_status_text()
+        self._update_state_from_status(response)
         self._log_response(response)
         match = POSITION_RE.search(response)
         if not match:
@@ -220,6 +230,8 @@ class GrblSerialController:
         self._require_connected()
         response = self.query(command, wait_seconds=wait_seconds, log_command=True)
         self._log_response(response)
+        if not response.strip():
+            raise RuntimeError(f"Keine Antwort vom Controller bei: {command}")
         if "error:" in response.lower():
             raise RuntimeError(f"GRBL meldet Fehler bei: {command}")
         return response
@@ -277,9 +289,12 @@ class GrblSerialController:
             status = self._query_status_text()
             if status:
                 last_status = status
+                self._update_state_from_status(status)
                 self._log_response(status)
-                if "<Idle" in status:
+                if self.state.status == "Idle":
                     return
+                if self.state.alarm:
+                    raise RuntimeError(f"Controller meldet Alarm. Letzter Status: {last_status}")
             time.sleep(0.25)
         raise RuntimeError(f"Timeout beim Warten auf Idle. Letzter Status: {last_status}")
 
@@ -292,6 +307,17 @@ class GrblSerialController:
 
     def _is_hold_status(self, response: str) -> bool:
         return "<Hold" in response
+
+    def _update_state_from_status(self, response: str) -> None:
+        status_match = STATUS_RE.search(response)
+        if status_match:
+            self.state.status = status_match.group(1)
+            self.state.paused = self.state.status.startswith("Hold")
+            self.state.alarm = self.state.status.startswith("Alarm")
+        position_match = POSITION_RE.search(response)
+        if position_match:
+            self.state.x_mm = float(position_match.group(1))
+            self.state.y_mm = float(position_match.group(2))
 
     def _combine_responses(self, *responses: str) -> str:
         lines = []

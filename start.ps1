@@ -11,9 +11,9 @@ if (Test-Path ".\.venv\Scripts\python.exe") {
     exit 1
 }
 
-& $pythonCmd -c "import serial" 2>$null
+& $pythonCmd -c "import serial; import PySide6" 2>$null
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "pyserial fehlt - installiere Abhaengigkeiten aus requirements.txt ..."
+    Write-Host "Abhaengigkeiten fehlen - installiere aus requirements.txt ..."
     & $pythonCmd -m pip install -r "requirements.txt"
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Installation fehlgeschlagen. Bitte manuell ausfuehren: py -m pip install -r requirements.txt"
