@@ -6,7 +6,7 @@ from laser_control.svg_import import Polyline
 
 FALCON_MAX_WIDTH_MM = 400.0
 FALCON_MAX_HEIGHT_MM = 415.0
-MOTION_COMMAND_RE = re.compile(r"^G0*[123](?:\D|$)")
+MOTION_COMMAND_RE = re.compile(r"^G0*[0123](?:\D|$)")
 LASER_POWER_WORD_RE = re.compile(r"\sS[-+]?(?:\d+(?:\.\d+)?|\.\d+)\b", re.IGNORECASE)
 ENGRAVE_MODE = "gravieren"
 CUT_MODE = "cutten"

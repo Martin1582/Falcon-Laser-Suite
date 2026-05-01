@@ -1,6 +1,7 @@
 # Laser Control
 
 Windows desktop tool for preparing and controlling engraving laser jobs.
+The current UI uses PySide6/Qt.
 
 This first version is intentionally safe-by-default:
 
@@ -18,7 +19,7 @@ This first version is intentionally safe-by-default:
 
 - uses `.venv\Scripts\python.exe` if available
 - otherwise falls back to `py` or `python`
-- installs missing dependencies from `requirements.txt` (including `pyserial`)
+- installs missing dependencies from `requirements.txt` (including `pyserial` and `PySide6`)
 
 Manual start (if preferred):
 
@@ -61,6 +62,10 @@ Before every real engraving or cutting job:
 - **Gravieren**: uses `M4` (dynamic laser power), suitable for engraving.
 - **Cutten**: uses `M3` (constant laser power), suitable for cutting passes.
 - Mode selection affects generated preview G-code for all current job types.
+- Parameters are remembered per mode (`Leistung`, `Geschwindigkeit`, `Durchgaenge`) for each selected material.
+- In cut mode, aggressive settings trigger an extra warning dialog before hardware start.
+- Built-in material profiles are starter values researched from Creality Falcon/Falcon CR 10W material tables.
+  Always run a small test matrix before using a new material batch.
 
 ## Desktop Shortcut
 
@@ -79,6 +84,8 @@ Optional custom icon:
 
 - project/job settings
 - material profile selection and editable power/speed/pass values
+- local assistant with risk score, recommendations, test-matrix generation, and job-history learning
+- profile and job-history import/export as JSON
 - project save/load as `.laser.json`
 - SVG import for basic vector paths
 - proportional SVG placement with automatic fit or manual width/offset
@@ -89,6 +96,8 @@ Optional custom icon:
 - simulator mode for connect, home, jog, frame, start, pause, and stop actions
 - GRBL/USB mode with COM-port discovery, connect/disconnect, status, settings,
   homing, jog, pause/resume, and laser-off stop/reset
+- automatic laser COM-port detection with GRBL probing
+- GRBL status tracking for Idle/Hold/Alarm and current position
 - generated G-code preview and rectangular frame starter output
 
 ## Next Milestones

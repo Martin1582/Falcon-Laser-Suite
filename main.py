@@ -1,10 +1,11 @@
-from laser_control.app import LaserControlApp
+import sys
+
+from laser_control.pyside_app import run_app
 
 
-def main() -> None:
-    app = LaserControlApp()
-    app.mainloop()
+def main() -> int:
+    return run_app()
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
