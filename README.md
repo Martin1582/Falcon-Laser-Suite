@@ -3,6 +3,12 @@
 Windows desktop tool for preparing and controlling engraving laser jobs.
 The current UI uses PySide6/Qt.
 
+## Active UI and Legacy Code
+
+The supported desktop entry point is `main.py`, which starts `laser_control.pyside_app.run_app`.
+The older Tkinter module `laser_control/app.py` is retained only as deprecated reference code during
+the Qt transition. New UI and machine-control fixes belong on the PySide6 path.
+
 This first version is intentionally safe-by-default:
 
 - laser communication can run in simulator mode or GRBL/USB mode
@@ -19,7 +25,7 @@ This first version is intentionally safe-by-default:
 
 - uses `.venv\Scripts\python.exe` if available
 - otherwise falls back to `py` or `python`
-- installs missing dependencies from `requirements.txt` (including `pyserial` and `PySide6`)
+- installs missing dependencies from `requirements.txt` (including `pyserial`, `PySide6`, and `Pillow`)
 
 Manual start (if preferred):
 
@@ -44,6 +50,24 @@ Run tests:
 
 ```powershell
 .\run-tests.ps1
+```
+
+## Windows Build
+
+The project contains a PyInstaller configuration for a folder-based Windows build:
+
+```powershell
+.\build.ps1
+```
+
+`build.ps1` installs `requirements-dev.txt` if needed, runs the test suite, and then builds with
+`laser_control.spec`. The spec explicitly collects Pillow/PIL modules and image plugins so PNG/JPG
+import keeps working in packaged builds.
+
+Build output:
+
+```text
+dist\LaserControl\LaserControl.exe
 ```
 
 ## Recommended Workflow
@@ -88,6 +112,8 @@ Optional custom icon:
 - profile and job-history import/export as JSON
 - project save/load as `.laser.json`
 - SVG import for basic vector paths
+- PNG/JPG import as raster sources for preview/preflight; hardware start is blocked until raster G-code exists
+- automatic proportional AutoFit for imported SVG/PNG/JPG sources
 - proportional SVG placement with automatic fit or manual width/offset
 - material measurement from two laser head positions
 - local material database for measured or manually entered sheets

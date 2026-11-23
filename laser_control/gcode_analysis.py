@@ -10,6 +10,16 @@ MOTION_PREFIXES = ("G0", "G00", "G1", "G01", "G2", "G02", "G3", "G03")
 
 
 @dataclass
+class GCodeSegment:
+    start_x: float
+    start_y: float
+    end_x: float
+    end_y: float
+    rapid: bool = False
+    laser_power: float | None = None
+
+
+@dataclass
 class GCodeAnalysis:
     commands: list[str]
     movement_count: int = 0
@@ -23,6 +33,7 @@ class GCodeAnalysis:
     estimated_runtime_seconds: float = 0.0
     uses_relative_positioning: bool = False
     warnings: list[str] = field(default_factory=list)
+    segments: list[GCodeSegment] = field(default_factory=list)
 
     @property
     def has_bounds(self) -> bool:
@@ -83,12 +94,24 @@ def analyze_gcode(gcode: str, work_width_mm: float, work_height_mm: float) -> GC
             analysis.laser_command_count += 1
 
         if first_word in MOTION_PREFIXES:
+            start_x = x
+            start_y = y
             next_x = words.get("X", x)
             next_y = words.get("Y", y)
             if not absolute_positioning:
                 next_x = x + words.get("X", 0.0)
                 next_y = y + words.get("Y", 0.0)
             _include_point(analysis, next_x, next_y)
+            analysis.segments.append(
+                GCodeSegment(
+                    start_x=start_x,
+                    start_y=start_y,
+                    end_x=next_x,
+                    end_y=next_y,
+                    rapid=first_word in {"G0", "G00"},
+                    laser_power=words.get("S"),
+                )
+            )
             analysis.movement_count += 1
             distance = math.hypot(next_x - x, next_y - y)
             if feed > 0:

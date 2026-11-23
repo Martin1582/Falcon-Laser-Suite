@@ -11,7 +11,7 @@ if (Test-Path ".\.venv\Scripts\python.exe") {
     exit 1
 }
 
-& $pythonCmd -c "import serial; import PySide6" 2>$null
+& $pythonCmd -c "import serial; import PySide6; import PIL" 2>$null
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Abhaengigkeiten fehlen - installiere aus requirements.txt ..."
     & $pythonCmd -m pip install -r "requirements.txt"

@@ -1,4 +1,4 @@
-from laser_control.svg_import import fit_paths_to_area, scale_paths_to_width
+from laser_control.svg_import import fit_paths_to_area, fit_paths_to_box, scale_paths_to_width
 
 
 def test_fit_paths_to_area_respects_margin_and_area() -> None:
@@ -37,3 +37,18 @@ def test_scale_paths_to_width_scales_height_proportionally() -> None:
     assert fitted_width == 100.0
     assert fitted_height == 50.0
     assert transformed[0][0] == (5.0, 7.0)
+
+
+def test_fit_paths_to_box_offsets_into_material_space() -> None:
+    paths = [[(0.0, 0.0), (100.0, 0.0), (100.0, 100.0)]]
+
+    transformed, fitted_width, fitted_height = fit_paths_to_box(paths, 10.0, 0.0, 80.0, 80.0, 5.0)
+
+    xs = [point[0] for polyline in transformed for point in polyline]
+    ys = [point[1] for polyline in transformed for point in polyline]
+    assert fitted_width == 70.0
+    assert fitted_height == 70.0
+    assert min(xs) == 15.0
+    assert max(xs) == 85.0
+    assert min(ys) == 5.0
+    assert max(ys) == 75.0

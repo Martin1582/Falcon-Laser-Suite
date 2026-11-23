@@ -7,4 +7,14 @@ venv/
 dist/
 build/
 *.spec
+!laser_control.spec
 tools/
+
+# Local reference material (photos, datasheets, screenshots) - not part of the source
+reference/
+
+# Stray copy of a separate project (the real repo lives in ../FitnessTracker)
+FitnessTracker/
+
+# Local test/pytest artefacts
+.pytest_cache/

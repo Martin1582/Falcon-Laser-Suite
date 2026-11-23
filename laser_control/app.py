@@ -1,3 +1,9 @@
+"""Deprecated Tkinter UI retained only as reference during the Qt transition.
+
+The supported application entry point is ``main.py`` -> ``laser_control.pyside_app.run_app``.
+Do not add new features here; keep machine/UI fixes on the PySide6 path.
+"""
+
 import queue
 import threading
 import tkinter as tk
@@ -21,16 +27,20 @@ from laser_control.svg_import import fit_paths_to_area, import_svg, scale_paths_
 from laser_control.workflow import build_cut_mode_warnings, derive_cut_profile_from_engrave
 
 
+DEPRECATED_LEGACY_UI = True
+SUPPORTED_ENTRY_POINT = "main.py"
+
+
 class LaserControlApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
 
-        self.title("Laser Control")
+        self.title("Laser Phoenix")
         self.geometry("1120x720")
         self.minsize(980, 620)
 
-        self.work_width = tk.DoubleVar(value=300.0)
-        self.work_height = tk.DoubleVar(value=200.0)
+        self.work_width = tk.DoubleVar(value=400.0)
+        self.work_height = tk.DoubleVar(value=415.0)
         self.profile_name = tk.StringVar(value=DEFAULT_PROFILES[0].name)
         self.power_percent = tk.IntVar(value=DEFAULT_PROFILES[0].power_percent)
         self.speed_mm_min = tk.IntVar(value=DEFAULT_PROFILES[0].speed_mm_min)
@@ -48,7 +58,7 @@ class LaserControlApp(tk.Tk):
         self.original_imported_paths = []
         self.imported_file = None
         self.svg_placement_mode = tk.StringVar(value="Automatisch")
-        self.svg_margin = tk.DoubleVar(value=5.0)
+        self.svg_margin = tk.DoubleVar(value=0.5)
         self.svg_manual_width = tk.DoubleVar(value=50.0)
         self.svg_offset_x = tk.DoubleVar(value=0.0)
         self.svg_offset_y = tk.DoubleVar(value=0.0)
@@ -132,7 +142,7 @@ class LaserControlApp(tk.Tk):
         self.sidebar_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
     def _build_sidebar(self, parent: ttk.Frame) -> None:
-        ttk.Label(parent, text="Verbindung", font=("Segoe UI", 12, "bold")).pack(anchor="w")
+        ttk.Label(parent, text="Verbindung", font=("Segoe UI", 14, "bold")).pack(anchor="w")
 
         status_row = ttk.Frame(parent)
         status_row.pack(fill="x", pady=(8, 4))
@@ -157,7 +167,7 @@ class LaserControlApp(tk.Tk):
         ttk.Button(parent, text="Status abfragen", command=self._query_status).pack(fill="x", pady=(0, 4))
         ttk.Button(parent, text="GRBL Settings", command=self._query_settings).pack(fill="x", pady=(0, 16))
 
-        ttk.Label(parent, text="Jog", font=("Segoe UI", 12, "bold")).pack(anchor="w")
+        ttk.Label(parent, text="Jog", font=("Segoe UI", 14, "bold")).pack(anchor="w")
         jog = ttk.Frame(parent)
         jog.pack(pady=8)
         ttk.Button(jog, text="Y+", width=7, command=lambda: self._run_controller_action(lambda controller: controller.jog(0, 10))).grid(row=0, column=1)
@@ -167,7 +177,7 @@ class LaserControlApp(tk.Tk):
 
         ttk.Separator(parent).pack(fill="x", pady=16)
 
-        ttk.Label(parent, text="Material", font=("Segoe UI", 12, "bold")).pack(anchor="w")
+        ttk.Label(parent, text="Material", font=("Segoe UI", 14, "bold")).pack(anchor="w")
         ttk.Label(parent, textvariable=self.material_measurement_label, wraplength=150).pack(anchor="w", pady=(6, 4))
         ttk.Button(parent, text="Ecke 1 setzen", command=lambda: self._capture_material_point(1)).pack(fill="x", pady=4)
         ttk.Button(parent, text="Ecke 2 setzen", command=lambda: self._capture_material_point(2)).pack(fill="x", pady=4)
@@ -194,7 +204,7 @@ class LaserControlApp(tk.Tk):
 
         ttk.Separator(parent).pack(fill="x", pady=16)
 
-        ttk.Label(parent, text="Job", font=("Segoe UI", 12, "bold")).pack(anchor="w")
+        ttk.Label(parent, text="Job", font=("Segoe UI", 14, "bold")).pack(anchor="w")
         ttk.Label(parent, text="Modus").pack(anchor="w", pady=(8, 0))
         mode_select = ttk.Combobox(
             parent,
@@ -213,7 +223,7 @@ class LaserControlApp(tk.Tk):
         ttk.Button(parent, text="Stop", command=lambda: self._run_controller_action(lambda controller: controller.stop(), allow_while_busy=True)).pack(fill="x", pady=4)
         ttk.Separator(parent).pack(fill="x", pady=16)
 
-        ttk.Label(parent, text="Projekt", font=("Segoe UI", 12, "bold")).pack(anchor="w")
+        ttk.Label(parent, text="Projekt", font=("Segoe UI", 14, "bold")).pack(anchor="w")
         ttk.Button(parent, text="SVG importieren", command=self._import_svg).pack(fill="x", pady=(8, 4))
         ttk.Button(parent, text="Speichern", command=self._save_project).pack(fill="x", pady=(8, 4))
         ttk.Button(parent, text="Laden", command=self._load_project).pack(fill="x", pady=4)
@@ -259,7 +269,7 @@ class LaserControlApp(tk.Tk):
         ttk.Radiobutton(placement, text="Automatisch", value="Automatisch", variable=self.svg_placement_mode, command=self._apply_svg_placement).grid(row=0, column=0, sticky="w")
         ttk.Radiobutton(placement, text="Manuell", value="Manuell", variable=self.svg_placement_mode, command=self._apply_svg_placement).grid(row=0, column=1, sticky="w", padx=(12, 0))
         ttk.Label(placement, text="Rand").grid(row=1, column=0, sticky="w", pady=(8, 0))
-        margin = ttk.Spinbox(placement, from_=0, to=50, increment=1, textvariable=self.svg_margin, width=6, command=self._apply_svg_placement)
+        margin = ttk.Spinbox(placement, from_=0, to=50, increment=0.1, textvariable=self.svg_margin, width=6, command=self._apply_svg_placement)
         margin.grid(row=1, column=1, sticky="w", pady=(8, 0))
         ttk.Label(placement, text="Breite").grid(row=1, column=2, sticky="w", padx=(12, 0), pady=(8, 0))
         manual_width = ttk.Spinbox(placement, from_=1, to=400, increment=1, textvariable=self.svg_manual_width, width=7, command=self._apply_svg_placement)
@@ -378,9 +388,9 @@ class LaserControlApp(tk.Tk):
 
         def frame() -> None:
             try:
-                controller.frame(width, height)
+                controller.frame(width, height) # pyright: ignore[reportCallIssue]
             except TypeError:
-                controller.frame()
+                controller.frame() # pyright: ignore[reportCallIssue]
 
         self._run_worker(frame)
 
@@ -458,9 +468,9 @@ class LaserControlApp(tk.Tk):
 
         def start() -> None:
             try:
-                controller.start_job(gcode, width, height)
+                controller.start_job(gcode, width, height) # pyright: ignore[reportCallIssue]
             except TypeError:
-                controller.start_job(gcode)
+                controller.start_job(gcode) # pyright: ignore[reportCallIssue]
 
         self._run_worker(start)
 
@@ -516,9 +526,9 @@ class LaserControlApp(tk.Tk):
 
         def start_dry_run() -> None:
             try:
-                controller.start_job(dry_run_gcode, width, height)
+                controller.start_job(dry_run_gcode, width, height) # pyright: ignore[reportCallIssue]
             except TypeError:
-                controller.start_job(dry_run_gcode)
+                controller.start_job(dry_run_gcode) # pyright: ignore[reportCallIssue]
 
         self._run_worker(start_dry_run)
 
@@ -703,7 +713,7 @@ class LaserControlApp(tk.Tk):
         svg_placement = data.get("svg_placement")
         if svg_placement:
             self.svg_placement_mode.set(svg_placement.get("mode", "Automatisch"))
-            self.svg_margin.set(float(svg_placement.get("margin", 5.0)))
+            self.svg_margin.set(float(svg_placement.get("margin", 0.5)))
             self.svg_manual_width.set(float(svg_placement.get("manual_width", 50.0)))
             self.svg_offset_x.set(float(svg_placement.get("offset_x", 0.0)))
             self.svg_offset_y.set(float(svg_placement.get("offset_y", 0.0)))

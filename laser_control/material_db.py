@@ -1,6 +1,7 @@
-import json
 import os
 from pathlib import Path
+
+from laser_control.json_store import read_json_object, write_json_object
 
 
 LEGACY_MATERIAL_DB_PATH = Path(__file__).resolve().parent.parent / "materials.json"
@@ -21,14 +22,18 @@ def load_materials() -> list[dict]:
     source_path = path if path.exists() else LEGACY_MATERIAL_DB_PATH
     if not source_path.exists():
         return []
-    data = json.loads(source_path.read_text(encoding="utf-8"))
-    return data.get("materials", [])
+    try:
+        data = read_json_object(source_path, {"materials": []})
+    except ValueError:
+        return []
+    materials = data.get("materials", [])
+    return materials if isinstance(materials, list) else []
 
 
 def save_materials(materials: list[dict]) -> None:
     path = material_db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"materials": materials}, indent=2), encoding="utf-8")
+    write_json_object(path, {"materials": materials})
 
 
 def upsert_material(record: dict) -> list[dict]:

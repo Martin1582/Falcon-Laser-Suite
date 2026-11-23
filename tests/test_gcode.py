@@ -5,11 +5,15 @@ from laser_control.gcode import (
     FALCON_MAX_HEIGHT_MM,
     FALCON_MAX_WIDTH_MM,
     build_dry_run_gcode,
+    build_layered_polyline_gcode,
+    build_multi_item_layered_polyline_gcode,
     build_polyline_gcode,
     build_rectangle_frame_gcode,
+    build_safe_frame_gcode,
     prepare_job_gcode,
     validate_falcon_work_area,
 )
+from laser_control.layers import JobLayer, LayerType
 from laser_control.models import MaterialProfile
 
 
@@ -60,6 +64,40 @@ def test_build_polyline_gcode_uses_m3_in_cut_mode() -> None:
     assert "M4 ; dynamic laser power" not in lines
 
 
+def test_build_layered_polyline_gcode_uses_each_layer_parameters() -> None:
+    paths = [[(0.0, 0.0), (15.0, 0.0)]]
+    layers = [
+        JobLayer("Gravur", LayerType.ENGRAVE, True, True, 2200, 25, 10, passes=2),
+        JobLayer("Schnitt", LayerType.CUT, True, True, 500, 80, 20, passes=1),
+    ]
+
+    lines = build_layered_polyline_gcode(paths, layers).splitlines()
+
+    assert "G0 X0.00 Y0.00 F2200" in lines
+    assert "G1 X15.00 Y0.00 S250 F2200" in lines
+    assert "G0 X0.00 Y0.00 F500" in lines
+    assert "G1 X15.00 Y0.00 S800 F500" in lines
+    assert lines.count("; pass 1") == 2
+    assert lines.count("; pass 2") == 1
+
+
+def test_build_multi_item_layered_polyline_gcode_contains_each_active_motif() -> None:
+    layers = [JobLayer("Gravur", LayerType.ENGRAVE, True, True, 1200, 40, 10, passes=1)]
+
+    code = build_multi_item_layered_polyline_gcode(
+        [
+            ("Logo.svg", [[(5.0, 5.0), (20.0, 5.0)]]),
+            ("Text.svg", [[(45.0, 8.0), (80.0, 8.0)]]),
+        ],
+        layers,
+    )
+
+    assert "; artwork 1: Logo.svg" in code
+    assert "; artwork 2: Text.svg" in code
+    assert "G0 X5.00 Y5.00 F1200" in code
+    assert "G0 X45.00 Y8.00 F1200" in code
+
+
 def test_build_rectangle_frame_gcode_uses_mode_specific_laser_command() -> None:
     profile = MaterialProfile(name="Default", power_percent=40, speed_mm_min=1000, passes=1)
 
@@ -91,3 +129,23 @@ def test_build_dry_run_gcode_forces_laser_off_and_strips_power() -> None:
     assert "M3" not in dry
     assert "M4" not in dry
     assert all(" S" not in line.upper() for line in dry)
+
+
+def test_build_safe_frame_gcode_forces_zero_power() -> None:
+    commands = build_safe_frame_gcode(50.0, 30.0)
+
+    assert "M5" in commands
+    assert "S0" in commands
+    assert commands[-2:] == ["S0", "M5"]
+
+
+def test_build_safe_frame_gcode_uses_transformed_origin() -> None:
+    commands = build_safe_frame_gcode(80.0, 60.0, x_mm=250.0, y_mm=40.0)
+
+    assert commands[4:9] == [
+        "G0 X250.00 Y40.00 F2400",
+        "G0 X330.00 Y40.00 F2400",
+        "G0 X330.00 Y100.00 F2400",
+        "G0 X250.00 Y100.00 F2400",
+        "G0 X250.00 Y40.00 F2400",
+    ]

@@ -1,5 +1,5 @@
-from laser_control.app import build_cut_mode_warnings, derive_cut_profile_from_engrave
 from laser_control.models import MaterialProfile
+from laser_control.workflow import build_cut_mode_warnings, derive_cut_profile_from_engrave
 
 
 def test_derive_cut_profile_from_engrave_applies_safer_cut_bias() -> None:
