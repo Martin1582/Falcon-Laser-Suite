@@ -313,3 +313,18 @@ def test_emergency_stop_resets_controller_before_blocking_cleanup() -> None:
 
     assert calls[0] == "emergency_stop"
     assert app.machine_state.phase == MachinePhase.ALARM
+
+
+def test_machine_profile_baud_rate_reaches_existing_serial_controller() -> None:
+    from dataclasses import replace
+
+    from laser_control.machine_profiles import DEFAULT_MACHINE_PROFILE
+
+    app = ApplicationController(lambda _message: None, None, lambda: "")
+    app.switch_controller("GRBL ueber USB")
+    assert app.controller._baudrate == DEFAULT_MACHINE_PROFILE.baudrate
+
+    app.set_machine_profile(replace(DEFAULT_MACHINE_PROFILE, name="Slow", baudrate=57600))
+
+    assert app.controller._baudrate == 57600
+    app.shutdown_controller()

@@ -208,6 +208,15 @@ class GrblSerialController:
         self._update_state_from_status(handshake)
         self._emit_progress("Bereit", 1, 1)
 
+    def set_baudrate(self, baudrate: int) -> None:
+        """Use a new baud rate (e.g. after a machine profile change); applies on the next connect."""
+        baudrate = int(baudrate)
+        if baudrate == self._baudrate:
+            return
+        self._baudrate = baudrate
+        if self._executor.is_open:
+            self._log(f"Baudrate {baudrate} gilt ab der naechsten Verbindung.")
+
     def disconnect(self, log_message: bool = True) -> None:
         if self.state.connected:
             self._abort_requested.set()

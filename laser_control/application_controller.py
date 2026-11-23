@@ -74,6 +74,9 @@ class ApplicationController:
         self.ensure_alignment_laser_off("Maschinenprofilwechsel")
         self.machine_profile = profile
         self._apply_homing_policy()
+        set_baudrate = getattr(self.controller, "set_baudrate", None)
+        if callable(set_baudrate):
+            set_baudrate(profile.baudrate)
         self.set_current_workspace(profile.work_area_width, profile.work_area_height)
         self._log(
             "Maschinenprofil aktiv: "
