@@ -1727,3 +1727,52 @@ def test_pyside_generated_test_matrix_can_be_framed_and_started() -> None:
     window._sync_machine_action_buttons()
     assert not window.action_buttons["start_job"][0].isEnabled()
     window.close()
+
+
+def test_pyside_test_matrix_frames_its_own_gcode_not_imported_artwork(monkeypatch, tmp_path) -> None:
+    svg = tmp_path / "logo.svg"
+    svg.write_text(
+        '<svg width="10mm" height="10mm" viewBox="0 0 10 10"><polyline points="0,0 10,0 10,10 0,10 0,0"/></svg>',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("PySide6.QtWidgets.QFileDialog.getOpenFileName", lambda *_a, **_k: (str(svg), ""))
+    app = QApplication.instance() or QApplication([])
+    window = LaserControlWindow()
+    window._import_svg()
+    window.svg_offset_x.setValue(250.0)
+    window.svg_offset_y.setValue(250.0)
+    artwork_bounds = window.get_transformed_bounds()
+    assert artwork_bounds.min_x == pytest.approx(250.0)
+
+    window._generate_test_matrix()
+
+    frame = window.get_transformed_bounds()
+    gcode_bounds = window._gcode_bounds()
+    assert gcode_bounds is not None
+    assert (frame.min_x, frame.min_y, frame.max_x, frame.max_y) == (
+        gcode_bounds.min_x, gcode_bounds.min_y, gcode_bounds.max_x, gcode_bounds.max_y,
+    )
+    assert frame.max_x < 250.0
+    context = window._job_context(window.app_controller.controller, window.gcode_text.toPlainText())
+    assert context.source_type == "generated" and context.active_artwork_count is None
+    window.close()
+
+
+def test_pyside_profile_default_port_matches_decorated_port_labels(monkeypatch) -> None:
+    from laser_control.machine_profiles import DEFAULT_MACHINE_PROFILE
+
+    monkeypatch.setattr(
+        "laser_control.window_machine.list_serial_ports",
+        lambda: ["COM3 - Bluetooth", "COM9 - USB Serial Device"],
+    )
+    app = QApplication.instance() or QApplication([])
+    window = LaserControlWindow()
+    window.machine_profile = replace(DEFAULT_MACHINE_PROFILE, default_port="COM9")
+
+    window._refresh_ports()
+
+    assert window.serial_port.currentText() == "COM9 - USB Serial Device"
+    window.serial_port.setCurrentIndex(0)
+    window._apply_machine_profile(replace(DEFAULT_MACHINE_PROFILE, default_port="com9"))
+    assert window.serial_port.currentText() == "COM9 - USB Serial Device"
+    window.close()

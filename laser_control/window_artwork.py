@@ -497,6 +497,11 @@ class ArtworkMixin:
         )
 
     def get_transformed_bounds(self) -> ArtworkBounds:
+        if getattr(self, "_generated_job_name", None):
+            # A generated job (test matrix) replaces the artwork output: frame what will run.
+            generated_bounds = self._gcode_bounds()
+            if generated_bounds is not None:
+                return generated_bounds
         active_bounds = [item.transform.bounds for item in self.laser_project.items if item.active]
         if active_bounds:
             return ArtworkBounds(
@@ -517,6 +522,13 @@ class ArtworkMixin:
         if paths:
             min_x, min_y, max_x, max_y = path_bounds(paths)
             return ArtworkBounds(min_x, min_y, max_x, max_y)
+        generated_bounds = self._gcode_bounds()
+        if generated_bounds is not None:
+            return generated_bounds
+        return ArtworkBounds(0.0, 0.0, self.work_width.value(), self.work_height.value())
+
+    def _gcode_bounds(self) -> ArtworkBounds | None:
+        """Motion bounds of the G-code currently in the editor, if it can be analysed."""
         try:
             prepared = self.job_service.prepare_job(
                 self.gcode_text.toPlainText(),
@@ -525,16 +537,16 @@ class ArtworkMixin:
                 self._effective_job_profile(),
                 self.operation_mode.currentText(),
             )
-            if prepared.analysis.has_bounds:
-                return ArtworkBounds(
-                    prepared.analysis.min_x or 0.0,
-                    prepared.analysis.min_y or 0.0,
-                    prepared.analysis.max_x or 0.0,
-                    prepared.analysis.max_y or 0.0,
-                )
         except ValueError:
-            pass
-        return ArtworkBounds(0.0, 0.0, self.work_width.value(), self.work_height.value())
+            return None
+        if not prepared.analysis.has_bounds:
+            return None
+        return ArtworkBounds(
+            prepared.analysis.min_x or 0.0,
+            prepared.analysis.min_y or 0.0,
+            prepared.analysis.max_x or 0.0,
+            prepared.analysis.max_y or 0.0,
+        )
 
     def _apply_svg_placement(self) -> None:
         if self._transform_ui_updating:

@@ -894,7 +894,8 @@ class LaserControlWindow(
             gcode_segments = []
         if self.autofit_result is not None:
             warnings.append(self.autofit_result.summary)
-        if self.laser_project.items:
+        # A generated job (test matrix) is shown as its G-code, not as the imported artwork.
+        if self.laser_project.items and not getattr(self, "_generated_job_name", None):
             return build_multi_item_preview_model(
                 self._visible_preview_items(),
                 self._current_layers(),

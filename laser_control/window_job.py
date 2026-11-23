@@ -67,6 +67,12 @@ class JobMixin:
         if self.laser_project.items:
             source_name = ", ".join(item.name for item in active_items) or "Keine aktiven Motive"
             source_type = "multi"
+        generated_job = getattr(self, "_generated_job_name", None)
+        if generated_job:
+            # Imported artwork is not part of a generated job and must not block or describe it.
+            source_name = generated_job
+            source_type = "generated"
+            bounds_ok = transformed_bounds.within(self.work_width.value(), self.work_height.value())
         machine_state = self.app_controller.machine_state
         svg_warnings = self._svg_preflight_warnings()
         return JobContext(
@@ -83,7 +89,7 @@ class JobMixin:
             layers=self._current_layers(),
             parameter_source=self._parameter_source,
             alignment_mode_active=self.app_controller.is_alignment_mode_active(),
-            extra_blockers=self._missing_source_blockers(),
+            extra_blockers=[] if generated_job else self._missing_source_blockers(),
             extra_warnings=self._material_shape_warnings()
             + svg_warnings
             + ([f"Aktive Motive: {len(active_items)} von {len(self.laser_project.items)}"] if self.laser_project.items else []),
@@ -96,7 +102,7 @@ class JobMixin:
             max_power=self.machine_profile.max_power,
             source_name=source_name,
             source_type=source_type,
-            raster_gcode_available=self._raster_output_available(),
+            raster_gcode_available=True if generated_job else self._raster_output_available(),
             autofit_applied=bool(self.autofit_result and self.autofit_result.applied),
             source_original_width_mm=self.autofit_result.original_width_mm if self.autofit_result else None,
             source_original_height_mm=self.autofit_result.original_height_mm if self.autofit_result else None,
@@ -115,7 +121,7 @@ class JobMixin:
             auto_home_after_success=bool(
                 self.auto_home_after_job.isChecked() if hasattr(self, "auto_home_after_job") else False
             ),
-            active_artwork_count=len(active_items) if self.laser_project.items else None,
+            active_artwork_count=len(active_items) if self.laser_project.items and not generated_job else None,
         )
 
     def _start_job(self) -> None:
@@ -609,9 +615,11 @@ class JobMixin:
         self.artwork_source = None
         self.original_raster_source = None
         self.autofit_result = None
-        self._draw_preview()
-        # Mark the editor content as a runnable job so Frame/Dry Run/Start are not gated on artwork.
+        self.fill_toolpaths = []
+        # Mark the editor content as a runnable job so Frame/Dry Run/Start are not gated on artwork,
+        # and so preview, framing and preflight describe this G-code instead of the artwork.
         self._generated_job_name = "Testmatrix"
+        self._draw_preview()
         self._sync_machine_action_buttons()
         self.log("Testmatrix erzeugt. Bitte zuerst Dry Run und dann auf Restmaterial testen.")
 

@@ -7,7 +7,7 @@ from laser_control.machine_profile_dialog import MachineProfileDialog
 from laser_control.machine_log import MachineLogStatus
 from laser_control.machine_profiles import MachineProfile
 from laser_control.serial_autodetect import find_laser_port
-from laser_control.serial_grbl import list_serial_ports
+from laser_control.serial_grbl import list_serial_ports, port_device
 
 
 class MachineControlMixin:
@@ -33,9 +33,19 @@ class MachineControlMixin:
         self.serial_port.addItems(ports)
         if ports:
             default_port = getattr(self.machine_profile, "default_port", "")
-            index = self.serial_port.findText(default_port) if default_port else -1
+            index = self._port_index(default_port)
             self.serial_port.setCurrentIndex(index if index >= 0 else 0)
         self.log(f"{len(ports)} COM-Port(s) gefunden." if ports else "Keine COM-Ports gefunden.")
+
+    def _port_index(self, port: str) -> int:
+        """Index of a port in the combo box; labels look like 'COM9 - USB Serial'."""
+        wanted = port_device(port or "").upper()
+        if not wanted:
+            return -1
+        for index in range(self.serial_port.count()):
+            if port_device(self.serial_port.itemText(index)).upper() == wanted:
+                return index
+        return -1
 
     def _auto_detect_laser(self) -> None:
         self.log("Suche Laser an COM-Ports...")
@@ -164,7 +174,7 @@ class MachineControlMixin:
             self.work_width.setValue(profile.work_area_width)
             self.work_height.setValue(profile.work_area_height)
         if profile.default_port and hasattr(self, "serial_port"):
-            index = self.serial_port.findText(profile.default_port)
+            index = self._port_index(profile.default_port)
             if index >= 0:
                 self.serial_port.setCurrentIndex(index)
         self._refresh_gcode()
