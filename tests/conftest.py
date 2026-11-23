@@ -1,4 +1,9 @@
+import os
+
 import pytest
+
+# Qt widgets need a display; render offscreen so tests also run headless (CI, SSH).
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
 @pytest.fixture(autouse=True)
