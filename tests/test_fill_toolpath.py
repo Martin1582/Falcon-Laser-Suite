@@ -292,3 +292,22 @@ def test_square_nested_in_diamond_blocks_fill() -> None:
 
     assert has_nested_contours([diamond, square])
     assert build_fill_toolpath([diamond, square], "Gravur", 10, spacing_mm=0.5).unsafe_fill
+
+
+def test_nested_concave_contours_are_detected_when_vertex_mean_is_outside() -> None:
+    from laser_control.fill_toolpath import has_nested_contours
+
+    outer_c = [(0.0, 0.0), (10.0, 0.0), (10.0, 2.0), (2.0, 2.0), (2.0, 8.0), (10.0, 8.0), (10.0, 10.0), (0.0, 10.0), (0.0, 0.0)]
+    inner_c = [(0.5, 0.5), (9.5, 0.5), (9.5, 1.5), (1.5, 1.5), (1.5, 8.5), (9.5, 8.5), (9.5, 9.5), (0.5, 9.5), (0.5, 0.5)]
+
+    assert has_nested_contours([outer_c, inner_c])
+    assert build_fill_toolpath([outer_c, inner_c], "Gravur", 10, spacing_mm=0.5).unsafe_fill
+
+
+def test_separate_concave_contours_are_not_reported_as_nested() -> None:
+    from laser_control.fill_toolpath import has_nested_contours
+
+    left_c = [(0.0, 0.0), (10.0, 0.0), (10.0, 2.0), (2.0, 2.0), (2.0, 8.0), (10.0, 8.0), (10.0, 10.0), (0.0, 10.0), (0.0, 0.0)]
+    square_in_opening = [(4.0, 4.0), (6.0, 4.0), (6.0, 6.0), (4.0, 6.0), (4.0, 4.0)]
+
+    assert not has_nested_contours([left_c, square_in_opening])

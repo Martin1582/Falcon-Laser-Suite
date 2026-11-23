@@ -303,6 +303,7 @@ def is_closed_path(path: Polyline, tolerance: float = 1e-6) -> bool:
 def has_nested_contours(paths: list[Polyline]) -> bool:
     closed = [path for path in paths if is_closed_path(path)]
     bounds = [ArtworkBounds(*path_bounds([path])) for path in closed]
+    inner_points: dict[int, Point] = {}
     for outer_index, outer in enumerate(closed):
         for inner_index, inner in enumerate(closed):
             if outer_index == inner_index:
@@ -311,7 +312,9 @@ def has_nested_contours(paths: list[Polyline]) -> bool:
             inner_bounds = bounds[inner_index]
             if not _bounds_contains(outer_bounds, inner_bounds):
                 continue
-            test_point = _representative_point(inner)
+            if inner_index not in inner_points:
+                inner_points[inner_index] = _representative_point(inner)
+            test_point = inner_points[inner_index]
             if point_in_polygon(test_point, outer):
                 return True
     return False
@@ -345,11 +348,34 @@ def _bounds_contains(outer: ArtworkBounds, inner: ArtworkBounds, tolerance: floa
     )
 
 
+_REPRESENTATIVE_SCANLINES = 16
+
+
 def _representative_point(path: Polyline) -> Point:
+    """A point inside the closed contour, also for concave shapes.
+
+    The vertex mean can fall outside a concave contour (e.g. into the opening of a C shape), so
+    scan a horizontal line through the contour and take the middle of its widest interior span.
+    """
     points = path[:-1] if is_closed_path(path) else path
-    x = sum(point[0] for point in points) / max(1, len(points))
-    y = sum(point[1] for point in points) / max(1, len(points))
-    return x, y
+    mean = (
+        sum(point[0] for point in points) / max(1, len(points)),
+        sum(point[1] for point in points) / max(1, len(points)),
+    )
+    ys = sorted({point[1] for point in points})
+    gaps = list(zip(ys, ys[1:]))
+    # Scan between neighbouring vertex heights so the line never passes through a vertex; a few
+    # evenly spread gaps are enough and keep this linear for contours with many vertices.
+    step = max(1, len(gaps) // _REPRESENTATIVE_SCANLINES)
+    best: tuple[float, Point] | None = None
+    for low, high in gaps[::step]:
+        y = (low + high) / 2
+        crossings = _scanline_intersections(path, y)
+        for left, right in zip(crossings[0::2], crossings[1::2]):
+            width = right - left
+            if width > 0 and (best is None or width > best[0]):
+                best = (width, ((left + right) / 2, y))
+    return best[1] if best is not None else mean
 
 
 def _scanline_intersections(polygon: Polyline, y: float) -> list[float]:
