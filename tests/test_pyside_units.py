@@ -1708,3 +1708,22 @@ def test_pyside_deactivated_selected_raster_does_not_block_vector_job(monkeypatc
 
     assert raster_available()
     window.close()
+
+
+def test_pyside_generated_test_matrix_can_be_framed_and_started() -> None:
+    app = QApplication.instance() or QApplication([])
+    window = LaserControlWindow()
+    window.app_controller.switch_controller("Simulator")
+    window.app_controller.connect()
+    window.app_controller.home()
+
+    window._generate_test_matrix()
+
+    for action_id in ("frame", "dry_run", "start_job"):
+        assert window.action_buttons[action_id][0].isEnabled(), action_id
+
+    # Regenerating G-code from the (empty) artwork replaces the matrix and gates the job again.
+    window._refresh_gcode()
+    window._sync_machine_action_buttons()
+    assert not window.action_buttons["start_job"][0].isEnabled()
+    window.close()

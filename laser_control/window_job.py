@@ -396,6 +396,8 @@ class JobMixin:
     def _refresh_gcode(self) -> None:
         if not hasattr(self, "gcode_text"):
             return
+        # The editor is regenerated from the artwork now; a generated job (test matrix) is replaced.
+        self._generated_job_name = None
         self.laser_project.material_width_mm = self.work_width.value()
         self.laser_project.material_height_mm = self.work_height.value()
         self.laser_project.material_name = self.profile_name.currentText() if hasattr(self, "profile_name") else ""
@@ -608,6 +610,9 @@ class JobMixin:
         self.original_raster_source = None
         self.autofit_result = None
         self._draw_preview()
+        # Mark the editor content as a runnable job so Frame/Dry Run/Start are not gated on artwork.
+        self._generated_job_name = "Testmatrix"
+        self._sync_machine_action_buttons()
         self.log("Testmatrix erzeugt. Bitte zuerst Dry Run und dann auf Restmaterial testen.")
 
     def _record_job_result(self, result: str) -> None:

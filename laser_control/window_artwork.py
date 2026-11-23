@@ -69,12 +69,14 @@ class ArtworkMixin:
             self._active_transform_dialog = None
 
     def _has_loaded_motif(self) -> bool:
+        """True when there is something to run: imported artwork or a generated job (test matrix)."""
         return bool(
             self.imported_paths
             or self.original_imported_paths
             or self.raster_sources
             or self.laser_project.items
             or self.artwork_source is not None
+            or getattr(self, "_generated_job_name", None)
         )
 
     def _current_vector_paths(self) -> list:
