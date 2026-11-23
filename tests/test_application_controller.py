@@ -328,3 +328,30 @@ def test_machine_profile_baud_rate_reaches_existing_serial_controller() -> None:
 
     assert app.controller._baudrate == 57600
     app.shutdown_controller()
+
+
+def test_alarm_reported_on_connect_allows_homing_recovery() -> None:
+    class AlarmOnConnectSimulator(SimulatedLaserController):
+        def connect(self) -> None:
+            super().connect()
+            self.state.alarm = True  # GRBL after power-up: "ALARM:... Homing required"
+            self.state.status = "Alarm"
+
+    app = ApplicationController(lambda _message: None, None, lambda: "")
+    app.controller = AlarmOnConnectSimulator(lambda _message: None)
+
+    app.connect()
+
+    assert app.machine_state.phase == MachinePhase.ALARM
+    app.home()
+    assert app.machine_state.phase == MachinePhase.IDLE
+
+
+def test_alarm_status_after_error_is_not_rejected() -> None:
+    from laser_control.machine_state import MachineState
+
+    state = MachineState(phase=MachinePhase.ERROR)
+
+    state.transition(MachinePhase.ALARM, "Alarm")
+
+    assert state.phase == MachinePhase.ALARM
