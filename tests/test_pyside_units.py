@@ -1571,3 +1571,22 @@ def test_machine_profile_dialog_creates_profile_with_conservative_defaults(monke
     assert dialog.saved_profile.profile_id == "dialog-test"
     assert dialog.saved_profile.homing_required is True
     assert dialog.saved_profile.work_area_width == 300.0
+
+
+def test_pyside_pause_and_stop_enable_when_worker_switches_to_running() -> None:
+    app = QApplication.instance() or QApplication([])
+    window = LaserControlWindow()
+    window.app_controller.switch_controller("Simulator")
+    window.app_controller.connect()
+    window._sync_connection_indicator()
+    assert not window.action_buttons["pause"][0].isEnabled()
+    assert not window.action_buttons["stop"][0].isEnabled()
+
+    # A worker thread streams a job: it changes the machine state without finishing yet.
+    window.app_controller.machine_state.transition(MachinePhase.RUNNING, "Job gestartet")
+    window._sync_position_indicator()  # what the 250 ms machine-state timer runs
+
+    assert window.action_buttons["pause"][0].isEnabled()
+    assert window.action_buttons["stop"][0].isEnabled()
+    assert not window.action_buttons["start_job"][0].isEnabled()
+    window.close()

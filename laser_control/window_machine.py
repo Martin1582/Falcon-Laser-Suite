@@ -413,6 +413,7 @@ class MachineControlMixin:
         if controller_state is None or not hasattr(self, "status_panel"):
             return
         state = self.app_controller.machine_state
+        self._sync_action_buttons_on_state_change(state)
         if getattr(controller_state, "position_source", ""):
             state.x_mm = getattr(controller_state, "x_mm", None)
             state.y_mm = getattr(controller_state, "y_mm", None)
@@ -433,6 +434,20 @@ class MachineControlMixin:
                 options=self._preview_options(),
             )
             self.preview.update()
+
+    def _sync_action_buttons_on_state_change(self, state) -> None:
+        """Refresh action buttons when a worker thread changed the machine state.
+
+        Workers switch e.g. Idle -> Running while a job streams; without this, Pause/Stop would
+        stay disabled until the worker finishes.
+        """
+        signature = (state.phase, state.alignment_mode_active, state.work_area_trace_active)
+        if signature == getattr(self, "_last_action_button_state", None):
+            return
+        self._last_action_button_state = signature
+        self._sync_machine_action_buttons()
+        if hasattr(self, "machine_panel"):
+            self.machine_panel.update_state(state)
 
     def _set_connection_indicator(self, connected: bool) -> None:
         self.connection_label.setText("Verbunden" if connected else "Nicht verbunden")
