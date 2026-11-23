@@ -125,3 +125,24 @@ def test_start_validation_uses_machine_profile_limits() -> None:
 
     assert not result.passed
     assert any("Maschinenprofil" in item for item in result.blocking_errors)
+
+
+def test_start_validation_checks_edited_gcode_against_profile_limits() -> None:
+    # Material and layers stay inside the profile; only the hand-edited G-code exceeds it.
+    context = _context(gcode="G0 X0 Y0\nG1 X10 Y10 S800 F9000\nM5")
+    context = StartValidationContext(**{**context.__dict__, "max_speed": 2000, "max_power": 50})
+
+    result = StartConditionValidator().validate(context)
+
+    assert not result.passed
+    assert any("G-Code-Laserleistung" in item for item in result.blocking_errors)
+    assert any("G-Code-Vorschub" in item for item in result.blocking_errors)
+
+
+def test_start_validation_accepts_gcode_within_profile_limits() -> None:
+    context = _context(gcode="G0 X0 Y0\nG1 X10 Y10 S400 F1200\nM5")
+    context = StartValidationContext(**{**context.__dict__, "max_speed": 2000, "max_power": 50})
+
+    result = StartConditionValidator().validate(context)
+
+    assert not any("G-Code-" in item for item in result.blocking_errors)

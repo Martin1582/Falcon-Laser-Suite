@@ -120,6 +120,22 @@ class StartConditionValidator:
                 errors.append("G-Code enthaelt Laserleistung ueber 100%.")
             elif analysis.max_laser_power_percent >= 90:
                 warnings.append("G-Code enthaelt sehr hohe Laserleistung.")
+            # The G-code can be edited by hand, so check the commands themselves - not only the
+            # material/layer settings - against the machine profile limits.
+            if context.max_power is not None and analysis.max_laser_power_percent > context.max_power:
+                errors.append(
+                    f"G-Code-Laserleistung {analysis.max_laser_power_percent:.0f}% ueberschreitet "
+                    f"das Maschinenprofil ({context.max_power}%)."
+                )
+            if (
+                context.max_speed is not None
+                and analysis.max_feed_mm_min is not None
+                and analysis.max_feed_mm_min > context.max_speed
+            ):
+                errors.append(
+                    f"G-Code-Vorschub F{analysis.max_feed_mm_min:.0f} ueberschreitet "
+                    f"das Maschinenprofil ({context.max_speed} mm/min)."
+                )
 
         if hardware and not errors:
             info.append("Hardwarestart ist nur nach bestaetigtem Preflight erlaubt.")
