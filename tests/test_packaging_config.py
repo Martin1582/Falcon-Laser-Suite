@@ -35,9 +35,9 @@ def test_build_script_uses_project_spec_and_dev_requirements() -> None:
     assert "PyInstaller" in script
 
 
-def test_legacy_tkinter_app_is_marked_deprecated() -> None:
-    legacy_app = (ROOT / "laser_control" / "app.py").read_text(encoding="utf-8")
-
-    assert "Deprecated Tkinter UI" in legacy_app
-    assert "DEPRECATED_LEGACY_UI = True" in legacy_app
-    assert 'SUPPORTED_ENTRY_POINT = "main.py"' in legacy_app
+def test_legacy_tkinter_app_is_removed() -> None:
+    assert not (ROOT / "laser_control" / "app.py").exists()
+    for module in (ROOT / "laser_control").rglob("*.py"):
+        source = module.read_text(encoding="utf-8")
+        assert "import tkinter" not in source, module
+        assert "from tkinter" not in source, module
