@@ -273,3 +273,22 @@ def test_cut_fill_does_not_enable_overscan() -> None:
 
     assert not fill.overscan_enabled
     assert fill.overscan_segments == []
+
+
+def test_point_in_polygon_handles_descending_edges() -> None:
+    from laser_control.fill_toolpath import point_in_polygon
+
+    diamond = [(0.0, 5.0), (5.0, 0.0), (10.0, 5.0), (5.0, 10.0), (0.0, 5.0)]
+
+    assert point_in_polygon((5.0, 5.0), diamond)
+    assert not point_in_polygon((0.5, 0.5), diamond)
+
+
+def test_square_nested_in_diamond_blocks_fill() -> None:
+    from laser_control.fill_toolpath import has_nested_contours
+
+    diamond = [(0.0, 5.0), (5.0, 0.0), (10.0, 5.0), (5.0, 10.0), (0.0, 5.0)]
+    square = [(4.0, 4.0), (6.0, 4.0), (6.0, 6.0), (4.0, 6.0), (4.0, 4.0)]
+
+    assert has_nested_contours([diamond, square])
+    assert build_fill_toolpath([diamond, square], "Gravur", 10, spacing_mm=0.5).unsafe_fill

@@ -323,7 +323,9 @@ def point_in_polygon(point: Point, polygon: Polyline) -> bool:
     for index in range(len(polygon) - 1):
         x1, y1 = polygon[index]
         x2, y2 = polygon[index + 1]
-        if ((y1 > y) != (y2 > y)) and x < (x2 - x1) * (y - y1) / max(y2 - y1, 1e-12) + x1:
+        # The crossing test already excludes horizontal edges (y1 == y2), so dividing by the
+        # signed y2 - y1 is safe; clamping it would flip the sign for descending edges.
+        if ((y1 > y) != (y2 > y)) and x < (x2 - x1) * (y - y1) / (y2 - y1) + x1:
             inside = not inside
     return inside
 
