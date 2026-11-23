@@ -242,6 +242,9 @@ def build_multi_item_preview_model(
                 if layer.order == sorted(layers, key=lambda entry: entry.order)[0].order:
                     raster_items.append(item.raster_source)
                 continue
+            if not item.paths:
+                # e.g. a project item whose source file could not be reloaded: nothing to draw.
+                continue
             render_paths = transform_paths(item.paths, item.transform) if item.transform is not None else item.paths
             all_paths.extend(render_paths)
             fill_items = fill_map.get(item.item_id, [])

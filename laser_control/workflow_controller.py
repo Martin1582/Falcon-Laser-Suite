@@ -30,6 +30,7 @@ class JobContext:
     parameter_source: str = "Materialprofil/Default"
     alignment_mode_active: bool = False
     extra_warnings: list[str] = field(default_factory=list)
+    extra_blockers: list[str] = field(default_factory=list)
     machine_phase: str = ""
     machine_profile_name: str = "Standardmaschine"
     homing_required: bool = True
@@ -332,7 +333,7 @@ class WorkflowController:
 
     def prepare_preflight(self, context: JobContext) -> PreflightResult:
         self.record_action("Job vorbereitet", MachineLogStatus.INFO, "Preflight wird erstellt.")
-        blockers: list[str] = []
+        blockers: list[str] = list(context.extra_blockers)
         warnings = list(context.extra_warnings)
         warnings.append("Frame-Test vor Hardwarestart empfohlen.")
         warnings.extend(layer_validation_warnings(context.layers))

@@ -83,6 +83,7 @@ class JobMixin:
             layers=self._current_layers(),
             parameter_source=self._parameter_source,
             alignment_mode_active=self.app_controller.is_alignment_mode_active(),
+            extra_blockers=self._missing_source_blockers(),
             extra_warnings=self._material_shape_warnings()
             + svg_warnings
             + ([f"Aktive Motive: {len(active_items)} von {len(self.laser_project.items)}"] if self.laser_project.items else []),
@@ -300,6 +301,21 @@ class JobMixin:
             f"{bounds}, "
             f"ca. {analysis.estimated_runtime_label}."
         )
+
+    def _missing_source_blockers(self) -> list[str]:
+        """Active artworks whose source could not be loaded would be silently left out of the job."""
+        missing = [
+            item.name
+            for item in self.laser_project.items
+            if item.active and item.item_id not in self._item_sources
+        ]
+        if not missing:
+            return []
+        return [
+            "Motivquelle nicht geladen (Datei verschoben oder geloescht?): "
+            + ", ".join(missing)
+            + ". Motiv neu importieren, deaktivieren oder entfernen."
+        ]
 
     def _material_shape_warnings(self) -> list[str]:
         if not hasattr(self, "material_shape") or self.material_shape.currentText() != MATERIAL_SHAPE_CIRCLE:

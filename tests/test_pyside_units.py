@@ -1626,3 +1626,35 @@ def test_pyside_load_project_keeps_first_item_when_other_item_was_selected(monke
     selected = loaded._selected_artwork_item()
     assert loaded.svg_offset_x.value() == pytest.approx(selected.transform.x_mm)
     loaded.close()
+
+
+def test_pyside_preflight_blocks_active_item_whose_source_is_missing(monkeypatch, tmp_path) -> None:
+    logo = tmp_path / "logo.svg"
+    badge = tmp_path / "badge.svg"
+    for svg in (logo, badge):
+        svg.write_text(
+            '<svg width="10mm" height="10mm" viewBox="0 0 10 10"><polyline points="0,0 10,0 10,10 0,10 0,0"/></svg>',
+            encoding="utf-8",
+        )
+    app = QApplication.instance() or QApplication([])
+    window = LaserControlWindow()
+    for svg in (logo, badge):
+        monkeypatch.setattr("PySide6.QtWidgets.QFileDialog.getOpenFileName", lambda *_a, _p=svg, **_k: (str(_p), ""))
+        window._import_svg()
+    project_path = tmp_path / "two-sources.laser.json"
+    window.current_project_path = str(project_path)
+    window._save_project()
+    window.close()
+    badge.unlink()  # source file moved/deleted after saving
+
+    monkeypatch.setattr("PySide6.QtWidgets.QFileDialog.getOpenFileName", lambda *_a, **_k: (str(project_path), ""))
+    loaded = LaserControlWindow()
+    loaded._load_project()
+    loaded._refresh_gcode()
+    preflight = loaded.workflow.prepare_preflight(
+        loaded._job_context(loaded.app_controller.controller, loaded.gcode_text.toPlainText())
+    )
+
+    assert not preflight.can_start
+    assert any("Motivquelle nicht geladen" in blocker and "badge.svg" in blocker for blocker in preflight.blockers)
+    loaded.close()
