@@ -355,8 +355,14 @@ class WorkflowController:
                 blockers.append(
                     f"Layer '{layer.name}': Fuellung benoetigt mindestens eine geschlossene Flaeche."
                 )
-        if context.source_type == "raster" and not context.raster_gcode_available:
-            blockers.append("Rastergravur-GCode noch nicht verfuegbar.")
+        # Any active raster artwork blocks the job while raster G-code is not implemented - also in
+        # multi-artwork projects, where vector items would otherwise produce valid G-code and the
+        # raster item would be silently skipped.
+        if not context.raster_gcode_available:
+            if context.source_type == "multi":
+                blockers.append("Aktives Rastermotiv: Rastergravur-GCode noch nicht verfuegbar. Motiv deaktivieren oder entfernen.")
+            else:
+                blockers.append("Rastergravur-GCode noch nicht verfuegbar.")
         if context.active_artwork_count == 0:
             blockers.append("Kein aktives Motiv vorhanden.")
         if context.source_bounds_ok is False:

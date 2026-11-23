@@ -438,3 +438,34 @@ def test_preflight_warns_when_hardware_head_position_is_unknown() -> None:
 
     assert any("Kopfposition" in warning for warning in result.warnings)
     assert "Kopfposition: --" in "\n".join(result.summary_lines())
+
+
+def test_preflight_blocks_active_raster_in_multi_artwork_job() -> None:
+    profile = MaterialProfile("Holz", 40, 1200, 1)
+    workflow = WorkflowController(JobService(), MachineActionLog(), lambda _message: None)
+
+    result = workflow.prepare_preflight(
+        JobContext(
+            controller=Controller(True, True),
+            connection_mode="Simulator",
+            selected_port="",
+            machine_label="Simulator",
+            work_width_mm=100,
+            work_height_mm=80,
+            material_profile=profile,
+            operation_mode=ENGRAVE_MODE,
+            origin_label="Links unten",
+            # Valid vector G-code from the SVG item; the active raster item has no output yet.
+            gcode="G0 X0 Y0\nG1 X10 Y10 S400\nM5",
+            layers=build_default_layers(profile, ENGRAVE_MODE),
+            machine_phase="idle",
+            source_name="logo.svg, foto.png",
+            source_type="multi",
+            raster_gcode_available=False,
+            active_artwork_count=2,
+            source_bounds_ok=True,
+        )
+    )
+
+    assert not result.can_start
+    assert any("Rastermotiv" in blocker for blocker in result.blockers)
