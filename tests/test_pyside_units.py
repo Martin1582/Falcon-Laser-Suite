@@ -179,7 +179,7 @@ def test_pyside_transform_dialog_opens(monkeypatch, tmp_path) -> None:
         opened.append(dialog.windowTitle())
         return QDialog.DialogCode.Accepted
 
-    monkeypatch.setattr("laser_control.pyside_app.QDialog.exec", fake_exec)
+    monkeypatch.setattr("PySide6.QtWidgets.QDialog.exec", fake_exec)
     window = LaserControlWindow()
 
     window._open_transform_dialog()
@@ -203,7 +203,7 @@ def test_pyside_transform_dialog_accepts_values_and_updates_preview(monkeypatch,
         window.svg_offset_y.setValue(50.0)
         return QDialog.DialogCode.Accepted
 
-    monkeypatch.setattr("laser_control.pyside_app.QDialog.exec", fake_exec)
+    monkeypatch.setattr("PySide6.QtWidgets.QDialog.exec", fake_exec)
 
     window._open_transform_dialog()
 
@@ -232,7 +232,7 @@ def test_pyside_transform_dialog_cancel_restores_previous_values(monkeypatch, tm
         window.svg_offset_y.setValue(50.0)
         return QDialog.DialogCode.Rejected
 
-    monkeypatch.setattr("laser_control.pyside_app.QDialog.exec", fake_exec)
+    monkeypatch.setattr("PySide6.QtWidgets.QDialog.exec", fake_exec)
 
     window._open_transform_dialog()
 
@@ -439,7 +439,7 @@ def test_pyside_load_project_preserves_saved_margin(monkeypatch, tmp_path) -> No
     )
     save_project(str(project_path), data)
     monkeypatch.setattr(
-        "laser_control.pyside_app.QFileDialog.getOpenFileName",
+        "PySide6.QtWidgets.QFileDialog.getOpenFileName",
         lambda *_args, **_kwargs: (str(project_path), ""),
     )
     window = LaserControlWindow()
@@ -819,7 +819,7 @@ def test_pyside_imports_raster_as_blocked_preview_source(monkeypatch, tmp_path) 
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
     monkeypatch.setenv("LASER_CONTROL_JOB_HISTORY", str(tmp_path / "history.json"))
     monkeypatch.setenv("LASER_CONTROL_MATERIAL_DB", str(tmp_path / "materials.json"))
-    monkeypatch.setattr("laser_control.pyside_app.QFileDialog.getOpenFileName", lambda *_args, **_kwargs: (str(image_path), ""))
+    monkeypatch.setattr("PySide6.QtWidgets.QFileDialog.getOpenFileName", lambda *_args, **_kwargs: (str(image_path), ""))
     app = QApplication.instance() or QApplication([])
 
     window = LaserControlWindow()
@@ -838,7 +838,7 @@ def test_pyside_autofits_large_raster_to_work_area(monkeypatch, tmp_path) -> Non
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
     monkeypatch.setenv("LASER_CONTROL_JOB_HISTORY", str(tmp_path / "history.json"))
     monkeypatch.setenv("LASER_CONTROL_MATERIAL_DB", str(tmp_path / "materials.json"))
-    monkeypatch.setattr("laser_control.pyside_app.QFileDialog.getOpenFileName", lambda *_args, **_kwargs: (str(image_path), ""))
+    monkeypatch.setattr("PySide6.QtWidgets.QFileDialog.getOpenFileName", lambda *_args, **_kwargs: (str(image_path), ""))
     app = QApplication.instance() or QApplication([])
 
     window = LaserControlWindow()
@@ -1225,7 +1225,7 @@ def test_pyside_fill_controls_are_disabled_for_raster_source(monkeypatch, tmp_pa
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
     monkeypatch.setenv("LASER_CONTROL_JOB_HISTORY", str(tmp_path / "history.json"))
     monkeypatch.setenv("LASER_CONTROL_MATERIAL_DB", str(tmp_path / "materials.json"))
-    monkeypatch.setattr("laser_control.pyside_app.QFileDialog.getOpenFileName", lambda *_args, **_kwargs: (str(image_path), ""))
+    monkeypatch.setattr("PySide6.QtWidgets.QFileDialog.getOpenFileName", lambda *_args, **_kwargs: (str(image_path), ""))
     app = QApplication.instance() or QApplication([])
 
     window = LaserControlWindow()
@@ -1333,7 +1333,7 @@ def test_pyside_svg_analysis_is_shown_after_vector_import(monkeypatch, tmp_path)
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
     monkeypatch.setenv("LASER_CONTROL_JOB_HISTORY", str(tmp_path / "history.json"))
     monkeypatch.setenv("LASER_CONTROL_MATERIAL_DB", str(tmp_path / "materials.json"))
-    monkeypatch.setattr("laser_control.pyside_app.QFileDialog.getOpenFileName", lambda *_args, **_kwargs: (str(svg), ""))
+    monkeypatch.setattr("PySide6.QtWidgets.QFileDialog.getOpenFileName", lambda *_args, **_kwargs: (str(svg), ""))
     app = QApplication.instance() or QApplication([])
 
     window = LaserControlWindow()
@@ -1356,7 +1356,7 @@ def test_pyside_laser_intelligence_is_shown_in_sidebar_and_preflight(monkeypatch
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
     monkeypatch.setenv("LASER_CONTROL_JOB_HISTORY", str(tmp_path / "history.json"))
     monkeypatch.setenv("LASER_CONTROL_MATERIAL_DB", str(tmp_path / "materials.json"))
-    monkeypatch.setattr("laser_control.pyside_app.QFileDialog.getOpenFileName", lambda *_args, **_kwargs: (str(svg), ""))
+    monkeypatch.setattr("PySide6.QtWidgets.QFileDialog.getOpenFileName", lambda *_args, **_kwargs: (str(svg), ""))
     app = QApplication.instance() or QApplication([])
 
     window = LaserControlWindow()
@@ -1381,7 +1381,7 @@ def test_pyside_preflight_shows_falcon_material_recommendation(monkeypatch, tmp_
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
     monkeypatch.setenv("LASER_CONTROL_JOB_HISTORY", str(tmp_path / "history.json"))
     monkeypatch.setenv("LASER_CONTROL_MATERIAL_DB", str(tmp_path / "materials.json"))
-    monkeypatch.setattr("laser_control.pyside_app.QFileDialog.getOpenFileName", lambda *_args, **_kwargs: (str(svg), ""))
+    monkeypatch.setattr("PySide6.QtWidgets.QFileDialog.getOpenFileName", lambda *_args, **_kwargs: (str(svg), ""))
     app = QApplication.instance() or QApplication([])
 
     window = LaserControlWindow()
@@ -1409,7 +1409,7 @@ def test_pyside_svg_optimization_feeds_preview_and_gcode(monkeypatch, tmp_path) 
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
     monkeypatch.setenv("LASER_CONTROL_JOB_HISTORY", str(tmp_path / "history.json"))
     monkeypatch.setenv("LASER_CONTROL_MATERIAL_DB", str(tmp_path / "materials.json"))
-    monkeypatch.setattr("laser_control.pyside_app.QFileDialog.getOpenFileName", lambda *_args, **_kwargs: (str(svg), ""))
+    monkeypatch.setattr("PySide6.QtWidgets.QFileDialog.getOpenFileName", lambda *_args, **_kwargs: (str(svg), ""))
     app = QApplication.instance() or QApplication([])
 
     window = LaserControlWindow()
@@ -1503,7 +1503,7 @@ def test_pyside_machine_profile_editor_updates_active_profile(monkeypatch, tmp_p
         def exec(self) -> QDialog.DialogCode:
             return QDialog.DialogCode.Accepted
 
-    monkeypatch.setattr("laser_control.pyside_app.MachineProfileDialog", FakeProfileDialog)
+    monkeypatch.setattr("laser_control.window_machine.MachineProfileDialog", FakeProfileDialog)
     window = LaserControlWindow()
 
     window._edit_machine_profiles()
@@ -1524,7 +1524,7 @@ def test_pyside_blocks_profile_switch_while_connected(monkeypatch, tmp_path) -> 
     monkeypatch.setenv("LASER_CONTROL_MACHINE_PROFILES", str(profile_path))
     repository = MachineProfileRepository(profile_path)
     repository.upsert_profile(MachineProfile(profile_id="blocked-test", name="Blocked Test", machine_name="Blocked GRBL"))
-    monkeypatch.setattr("laser_control.pyside_app.QMessageBox.warning", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("PySide6.QtWidgets.QMessageBox.warning", lambda *_args, **_kwargs: None)
     app = QApplication.instance() or QApplication([])
     window = LaserControlWindow()
     window.app_controller.machine_state.transition(MachinePhase.IDLE, "Bereit")
@@ -1543,7 +1543,7 @@ def test_pyside_logs_blocked_profile_change(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("LASER_CONTROL_MATERIAL_DB", str(tmp_path / "materials.json"))
     profile_path = tmp_path / "machine_profiles.json"
     monkeypatch.setenv("LASER_CONTROL_MACHINE_PROFILES", str(profile_path))
-    monkeypatch.setattr("laser_control.pyside_app.QMessageBox.warning", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("PySide6.QtWidgets.QMessageBox.warning", lambda *_args, **_kwargs: None)
     app = QApplication.instance() or QApplication([])
     window = LaserControlWindow()
     window.app_controller.machine_state.transition(MachinePhase.IDLE, "Bereit")

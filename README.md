@@ -3,11 +3,9 @@
 Windows desktop tool for preparing and controlling engraving laser jobs.
 The current UI uses PySide6/Qt.
 
-## Active UI and Legacy Code
+## Entry Point
 
-The supported desktop entry point is `main.py`, which starts `laser_control.pyside_app.run_app`.
-The older Tkinter module `laser_control/app.py` is retained only as deprecated reference code during
-the Qt transition. New UI and machine-control fixes belong on the PySide6 path.
+`main.py` starts `laser_control.pyside_app.run_app`, the PySide6/Qt main window.
 
 This first version is intentionally safe-by-default:
 
@@ -126,10 +124,23 @@ Optional custom icon:
 - GRBL status tracking for Idle/Hold/Alarm and current position
 - generated G-code preview and rectangular frame starter output
 
+## Code Structure
+
+| Area | Modules |
+|---|---|
+| Main window | `pyside_app.py` (layout, preview wiring) plus feature mixins `window_machine`, `window_job`, `window_materials`, `window_artwork`, `window_project`, `window_status`, `window_theme` |
+| Widgets/panels | `work_area_preview`, `qt_panels`, `machine_panel`, `status_panel`, `console_log_panel`, `machine_profile_dialog` |
+| Controllers | `application_controller`, `workflow_controller`, `job_controller`, `machine_state`, `start_validation` |
+| Artwork & toolpaths | `svg_import`, `artwork_import`, `artwork_transform`, `artwork_scaling`, `fill_toolpath`, `svg_optimization`, `toolpath_optimizer` |
+| G-code & hardware | `gcode`, `gcode_analysis`, `serial_grbl`, `serial_executor`, `serial_autodetect`, `serial_consistency`, `laser` (simulator) |
+| Data | `project`, `material_db`, `job_history`, `machine_profiles`, `services/` |
+
+New UI behaviour belongs in the matching `window_*` mixin; machine and job logic belongs in the
+controllers/services so it stays testable without Qt.
+
 ## Next Milestones
 
-1. Add automated tests for G-code preparation, SVG transforms, and GRBL status parsing.
-2. Improve SVG arc accuracy and grouped import diagnostics.
-3. Add PNG import/raster engraving.
-4. Add a persistent profile library with import/export presets.
-5. Expand safety checks (machine bounds, alarm/hold handling, and clearer preflight warnings).
+1. Raster engraving G-code for PNG/JPG sources (currently preview/preflight only).
+2. Faster GRBL streaming (character-counting protocol instead of waiting for `ok` per line).
+3. Improve SVG arc accuracy and grouped import diagnostics.
+4. Continue moving logic out of the `window_*` mixins into Qt-free controllers.

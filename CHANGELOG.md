@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### Removed
+- Deprecated Tkinter UI (`laser_control/app.py`); `main.py` with the PySide6 window is the only entry point.
+
+### Changed
+- Split the 4,600-line `pyside_app.py` into the window core plus feature mixins
+  (`window_machine`, `window_job`, `window_materials`, `window_artwork`, `window_project`,
+  `window_status`, `window_theme`), the `work_area_preview` widget and shared `ui_common` constants.
+  Behaviour and the `LaserControlWindow` API are unchanged.
+- Tests run against an isolated temporary storage (`tests/conftest.py`) and never touch the real
+  `%APPDATA%\Laser Control` data.
+
 ### Changed
 - Switched the default app entry point from Tkinter to a new PySide6/Qt main window.
 - Updated startup dependency checks to install both `pyserial` and `PySide6`.
