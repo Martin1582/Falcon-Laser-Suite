@@ -28,6 +28,9 @@ STATUS_RE = re.compile(r"<([^|>]+)")
 FS_RE = re.compile(rf"FS:({NUMBER_PATTERN}),({NUMBER_PATTERN})")
 OV_RE = re.compile(r"Ov:(\d+),(\d+),(\d+)")
 SETTING_RE = re.compile(r"\$(\d+)=([-+]?(?:\d+(?:\.\d+)?|\.\d+))")
+ACTIVE_WCS_RE = re.compile(r"\[GC:[^\]]*\b(G5[4-9])\b")
+OFFSET_RE = re.compile(rf"\[(G5[4-9]|G92):({NUMBER_PATTERN}),({NUMBER_PATTERN}),({NUMBER_PATTERN})\]")
+TLO_RE = re.compile(rf"\[TLO:({NUMBER_PATTERN})\]")
 DEFAULT_GRBL_S_MAX = 1000.0
 
 
@@ -205,8 +208,37 @@ class GrblSerialController:
             self._log("Controller ist im Hold-Zustand. Mit Fortsetzen (~) oder Stop/Reset fortfahren.")
         else:
             self.send_command("M5")
+        self._load_work_offset()
         self._update_state_from_status(handshake)
         self._emit_progress("Bereit", 1, 1)
+
+    def _load_work_offset(self) -> None:
+        """Read the active work coordinate offset right after connecting.
+
+        GRBL includes WCO only in every few status reports, so without this the first reports
+        after connecting would show machine coordinates. WCO = active G54..G59 + G92 (+ TLO in Z).
+        Read-only ($G, $#); failures only fall back to waiting for the next WCO report.
+        """
+        try:
+            parser_state = self.query("$G", wait_seconds=1.0)
+            offsets_text = self.query("$#", wait_seconds=1.5)
+        except Exception as exc:  # noqa: BLE001 - optional refinement, connection stays usable
+            self._log(f"Arbeitsoffset konnte nicht gelesen werden: {exc}")
+            return
+        wcs_match = ACTIVE_WCS_RE.search(parser_state)
+        active_wcs = wcs_match.group(1) if wcs_match else "G54"
+        offsets = {match.group(1): tuple(float(match.group(i)) for i in (2, 3, 4)) for match in OFFSET_RE.finditer(offsets_text)}
+        if active_wcs not in offsets:
+            self._log("Arbeitsoffset nicht in $# gefunden; warte auf WCO im Statusreport.")
+            return
+        wcs = offsets[active_wcs]
+        g92 = offsets.get("G92", (0.0, 0.0, 0.0))
+        tlo_match = TLO_RE.search(offsets_text)
+        tlo = float(tlo_match.group(1)) if tlo_match else 0.0
+        self._last_wco = (wcs[0] + g92[0], wcs[1] + g92[1], wcs[2] + g92[2] + tlo)
+        self._log(
+            f"Arbeitsoffset {active_wcs}: WCO X{self._last_wco[0]:.3f} Y{self._last_wco[1]:.3f} Z{self._last_wco[2]:.3f}."
+        )
 
     def set_baudrate(self, baudrate: int) -> None:
         """Use a new baud rate (e.g. after a machine profile change); applies on the next connect."""

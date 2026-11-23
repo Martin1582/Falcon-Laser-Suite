@@ -345,3 +345,58 @@ GRBL getrennt.
 - Ergebnis: offen
 - Logauszug: offen
 - Folgeaufgabe: Ungueltigen G-Code, Alarm/Error und Controller-Reset nur beaufsichtigt testen.
+
+## Lauf HT-2026-11-23-PR4 - Nachtest der Review-Fixes aus PR #4
+
+- Datum: 2026-11-23
+- App-Version / Commit: `49fef1f` + WCO-beim-Verbinden-Fix (dieser Lauf)
+- Maschine: Creality Falcon 10W, USB `VID:PID=303A:4001` auf COM7, 115200 Baud
+- Firmware: `Grbl 1.3a` (ESP32), `$22=1` Homing aktiv, `$32=1` Laser-Modus, `$30=1000`, `$130/$131=400/415`
+- Arbeitsoffset: `G54 = 3.000, 3.000, 0.000`, `G92 = 0`
+- Tester: Benutzer anwesend an der Maschine; Ablauf per Skript ueber `ApplicationController`
+- Sicherheitsstatus: Laser in allen Schritten aus; Dry-Run-G-Code vor dem Senden auf `M3`/`M4`/`S` geprueft
+- Gesamtergebnis: bestanden (Test 6 an dieser Firmware nicht ausloesbar, siehe unten)
+
+### Testfall HT-PR4-WCO - Positionsanzeige mit Arbeitsoffset
+
+- Schritte: Verbinden, 10 Statusabfragen im Abstand von 0,3 s.
+- Erster Lauf: Status 1-7 zeigten `MPos` 0/0, ab Status 8 (erster Report mit `WCO`) `WPos` -3/-3. Cache haelt danach stabil, aber die ersten Sekunden nach dem Verbinden waren um den Offset verschoben.
+- Korrektur: Beim Verbinden werden `$G` (aktives G54..G59) und `$#` (Offsets, G92, TLO) gelesen und der WCO sofort gesetzt.
+- Nachtest: alle 10 Reports `X-3.0 Y-3.0`, Quelle `WPos (MPos-WCO)`; Log `Arbeitsoffset G54: WCO X3.000 Y3.000 Z0.000`.
+- Ergebnis: bestanden
+
+### Testfall HT-PR4-HOME - Referenzfahrt
+
+- Schritte: `$H` aus Idle.
+- Ergebnis: `ok` nach 0,65 s (Kopf stand bereits an Home). Firmware gibt dabei ESP32-Meldungen `gpio_isr_handler_remove ... not installed` aus; harmlos, werden nur geloggt.
+- Ergebnis: bestanden
+
+### Testfall HT-PR4-FRAME - Rahmenfahrt nach Disconnect
+
+- Schritte: Home, Trennen, Verbinden (Abbruch-Flag des Controllers danach nachweislich gesetzt), Home, Rahmen 20 x 20 mm bei X10 Y10.
+- Ergebnis: Rahmen mit `G0` ohne Laser vollstaendig abgefahren, 2,0 s, kein Abbruch durch das alte Flag.
+- Ergebnis: bestanden
+
+### Testfall HT-PR4-DRYRUN - Dry Run mit Pause / Fortsetzen
+
+- Schritte: Dry Run 3 x Quadrat 30 x 30 mm (F1500, nur `M5`), nach 3 s Pause (`!`), nach 2 s Fortsetzen (`~`).
+- Ergebnis: `Hold:0` nach 0,16 s bei MPos 35,312 / 43,000, Position waehrend Hold stabil, `Run` nach Resume, Job vollstaendig abgeschlossen (JobState `completed`).
+- Ergebnis: bestanden
+
+### Testfall HT-PR4-ESTOP - Sicherheitsstopp waehrend Dry Run
+
+- Schritte: Dry Run 4 x Quadrat, nach 3 s Sicherheitsstopp.
+- Ergebnis: Ctrl-X als erstes gesendet, Job-Streaming nach 87 ms abgebrochen, kein weiterer G-Code. `M5`/`S0` erst nach dem Firmware-Neustart (1,5 s spaeter). App markiert Maschine als nicht referenziert.
+- Beobachtung: Zustand wechselte kurz `error -> alarm`, weil der abgebrochene Job-Thread vor dem Alarm-Event einen Fehler meldet; nur kosmetisch.
+- Ergebnis: bestanden
+
+### Testfall HT-PR4-RECOVERY - Alarm-Wiederherstellung
+
+- Erwartung: nach Sicherheitsstopp Alarm; `$X` oder Home gibt frei.
+- Tatsaechlich: `Grbl 1.3a` meldet nach dem Soft-Reset `Idle`, keinen Alarm. `Alarm entsperren` wurde korrekt als im Zustand idle nicht erlaubt abgelehnt. Home gab die Maschine frei (`homed=True`, `alarm=False`).
+- Ergebnis: Home-Recovery bestanden; `$X`-Pfad an dieser Firmware nicht ausloesbar (nur automatisiert getestet)
+
+### Offen fuer manuellen Test in der App
+
+- Pause/Stop-Buttons waehrend eines laufenden Jobs anklickbar (UI-Fix aus PR #4).
+- Ausrichtlaser und echte Gravur auf Restmaterial.

@@ -438,3 +438,26 @@ def test_emergency_stop_sends_soft_reset_before_any_laser_off_command(monkeypatc
     assert not controller.state.alignment_mode_active
     assert controller.state.alarm
     controller.shutdown()
+
+
+def test_work_offset_is_read_on_connect_before_any_wco_report() -> None:
+    controller = GrblSerialController(log=lambda _message: None, port_getter=lambda: "COM1")
+    controller._serial = RealtimeSerial(
+        [
+            b"[GC:G0 G54 G17 G21 G90 G94 M5 M9 T0 F0 S0.000]\r\n",
+            b"ok\r\n",
+            b"[G54:3.000,3.000,0.000]\r\n",
+            b"[G55:0.000,0.000,0.000]\r\n",
+            b"[G92:0.500,0.000,0.000]\r\n",
+            b"[TLO:0.000]\r\n",
+            b"ok\r\n",
+        ]
+    )
+
+    controller._load_work_offset()
+    # First status report after connecting carries no WCO field.
+    controller._update_state_from_status("<Idle|MPos:0.000,0.000,0.000|FS:0,0>")
+
+    assert (controller.state.x_mm, controller.state.y_mm) == (-3.5, -3.0)
+    assert controller.state.position_source == "WPos (MPos-WCO)"
+    controller.shutdown()
