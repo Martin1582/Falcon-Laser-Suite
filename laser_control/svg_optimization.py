@@ -192,7 +192,7 @@ def _douglas_peucker(points: Polyline, tolerance_mm: float) -> Polyline:
     max_distance = -1.0
     split_index = 0
     for index, point in enumerate(points[1:-1], start=1):
-        distance = _perpendicular_distance(point, start, end)
+        distance = _segment_distance(point, start, end)
         if distance > max_distance:
             max_distance = distance
             split_index = index
@@ -203,17 +203,20 @@ def _douglas_peucker(points: Polyline, tolerance_mm: float) -> Polyline:
     return left[:-1] + right
 
 
-def _perpendicular_distance(point: Point, line_start: Point, line_end: Point) -> float:
-    line_length = _distance(line_start, line_end)
-    if line_length == 0:
-        return _distance(point, line_start)
-    numerator = abs(
-        (line_end[1] - line_start[1]) * point[0]
-        - (line_end[0] - line_start[0]) * point[1]
-        + line_end[0] * line_start[1]
-        - line_end[1] * line_start[0]
-    )
-    return numerator / line_length
+def _segment_distance(point: Point, segment_start: Point, segment_end: Point) -> float:
+    """Distance from point to the finite replacement segment (not its infinite line).
+
+    Measuring against the infinite line would let a path that doubles back collapse: for
+    (0,0) -> (10,0) -> (1,0) the turning point lies on the line but 9 mm beyond the segment.
+    """
+    dx = segment_end[0] - segment_start[0]
+    dy = segment_end[1] - segment_start[1]
+    length_sq = dx * dx + dy * dy
+    if length_sq == 0:
+        return _distance(point, segment_start)
+    t = ((point[0] - segment_start[0]) * dx + (point[1] - segment_start[1]) * dy) / length_sq
+    t = max(0.0, min(1.0, t))
+    return _distance(point, (segment_start[0] + t * dx, segment_start[1] + t * dy))
 
 
 def _segment_key(start: Point, end: Point, tolerance_mm: float) -> tuple[tuple[int, int], tuple[int, int]]:

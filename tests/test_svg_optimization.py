@@ -139,3 +139,12 @@ def test_duplicate_removal_rejoins_a_closed_contour_cut_once() -> None:
     deduped = remove_duplicate_segments([shared_edge, square], 0.02)
 
     assert deduped == [shared_edge, [(4.0, 4.0), (0.0, 4.0), (0.0, 0.0), (4.0, 0.0)]]
+
+
+def test_simplify_keeps_paths_that_double_back() -> None:
+    # The turning point lies on the supporting line but 9 mm beyond the replacement segment.
+    assert simplify_polyline([(0.0, 0.0), (10.0, 0.0), (1.0, 0.0)], 0.02) == [(0.0, 0.0), (10.0, 0.0), (1.0, 0.0)]
+
+
+def test_simplify_still_removes_points_within_tolerance() -> None:
+    assert simplify_polyline([(0.0, 0.0), (5.0, 0.01), (10.0, 0.0)], 0.02) == [(0.0, 0.0), (10.0, 0.0)]
