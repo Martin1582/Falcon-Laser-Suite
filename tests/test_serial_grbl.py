@@ -461,3 +461,17 @@ def test_work_offset_is_read_on_connect_before_any_wco_report() -> None:
     assert (controller.state.x_mm, controller.state.y_mm) == (-3.5, -3.0)
     assert controller.state.position_source == "WPos (MPos-WCO)"
     controller.shutdown()
+
+
+def test_grbl_settings_are_dropped_on_disconnect_so_pointer_power_uses_new_machine() -> None:
+    controller = GrblSerialController(log=lambda _message: None, port_getter=lambda: "COM1")
+    controller.grbl_settings = {30: 1000.0, 32: 1.0}  # cached from the previous machine
+    assert controller._alignment_s_value(5) == 50
+
+    controller.disconnect(log_message=False)
+    assert controller.grbl_settings == {}
+
+    # New machine with $30=100: the 5 % pointer must be S5, not S50.
+    controller._serial = RealtimeSerial([b"$30=100.000\r\n", b"$32=1\r\n", b"ok\r\n"])
+    assert controller._alignment_s_value(5) == 5
+    controller.shutdown()

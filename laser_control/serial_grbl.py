@@ -264,6 +264,9 @@ class GrblSerialController:
                 self._log(f"Fehler beim Trennen: {exc}")
         self.state = LaserState()
         self._last_wco = None
+        # Settings are device specific: a cached $30 (S max) from another machine would scale the
+        # alignment pointer power wrongly (e.g. "5 %" becoming 50 % on a $30=100 controller).
+        self.grbl_settings = {}
         if log_message:
             self._log("GRBL getrennt.")
         self._emit_progress("Getrennt", 0, 1)
