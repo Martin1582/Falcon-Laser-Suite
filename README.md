@@ -3,6 +3,10 @@
 Windows desktop tool for preparing and controlling engraving laser jobs.
 The current UI uses PySide6/Qt.
 
+## Entry Point
+
+`main.py` starts `laser_control.pyside_app.run_app`, the PySide6/Qt main window.
+
 This first version is intentionally safe-by-default:
 
 - laser communication can run in simulator mode or GRBL/USB mode
@@ -19,7 +23,7 @@ This first version is intentionally safe-by-default:
 
 - uses `.venv\Scripts\python.exe` if available
 - otherwise falls back to `py` or `python`
-- installs missing dependencies from `requirements.txt` (including `pyserial` and `PySide6`)
+- installs missing dependencies from `requirements.txt` (including `pyserial`, `PySide6`, and `Pillow`)
 
 Manual start (if preferred):
 
@@ -44,6 +48,24 @@ Run tests:
 
 ```powershell
 .\run-tests.ps1
+```
+
+## Windows Build
+
+The project contains a PyInstaller configuration for a folder-based Windows build:
+
+```powershell
+.\build.ps1
+```
+
+`build.ps1` installs `requirements-dev.txt` if needed, runs the test suite, and then builds with
+`laser_control.spec`. The spec explicitly collects Pillow/PIL modules and image plugins so PNG/JPG
+import keeps working in packaged builds.
+
+Build output:
+
+```text
+dist\LaserControl\LaserControl.exe
 ```
 
 ## Recommended Workflow
@@ -88,6 +110,8 @@ Optional custom icon:
 - profile and job-history import/export as JSON
 - project save/load as `.laser.json`
 - SVG import for basic vector paths
+- PNG/JPG import as raster sources for preview/preflight; hardware start is blocked until raster G-code exists
+- automatic proportional AutoFit for imported SVG/PNG/JPG sources
 - proportional SVG placement with automatic fit or manual width/offset
 - material measurement from two laser head positions
 - local material database for measured or manually entered sheets
@@ -100,10 +124,23 @@ Optional custom icon:
 - GRBL status tracking for Idle/Hold/Alarm and current position
 - generated G-code preview and rectangular frame starter output
 
+## Code Structure
+
+| Area | Modules |
+|---|---|
+| Main window | `pyside_app.py` (layout, preview wiring) plus feature mixins `window_machine`, `window_job`, `window_materials`, `window_artwork`, `window_project`, `window_status`, `window_theme` |
+| Widgets/panels | `work_area_preview`, `qt_panels`, `machine_panel`, `status_panel`, `console_log_panel`, `machine_profile_dialog` |
+| Controllers | `application_controller`, `workflow_controller`, `job_controller`, `machine_state`, `start_validation` |
+| Artwork & toolpaths | `svg_import`, `artwork_import`, `artwork_transform`, `artwork_scaling`, `fill_toolpath`, `svg_optimization`, `toolpath_optimizer` |
+| G-code & hardware | `gcode`, `gcode_analysis`, `serial_grbl`, `serial_executor`, `serial_autodetect`, `serial_consistency`, `laser` (simulator) |
+| Data | `project`, `material_db`, `job_history`, `machine_profiles`, `services/` |
+
+New UI behaviour belongs in the matching `window_*` mixin; machine and job logic belongs in the
+controllers/services so it stays testable without Qt.
+
 ## Next Milestones
 
-1. Add automated tests for G-code preparation, SVG transforms, and GRBL status parsing.
-2. Improve SVG arc accuracy and grouped import diagnostics.
-3. Add PNG import/raster engraving.
-4. Add a persistent profile library with import/export presets.
-5. Expand safety checks (machine bounds, alarm/hold handling, and clearer preflight warnings).
+1. Raster engraving G-code for PNG/JPG sources (currently preview/preflight only).
+2. Faster GRBL streaming (character-counting protocol instead of waiting for `ok` per line).
+3. Improve SVG arc accuracy and grouped import diagnostics.
+4. Continue moving logic out of the `window_*` mixins into Qt-free controllers.

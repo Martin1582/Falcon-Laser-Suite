@@ -42,16 +42,27 @@ def fit_paths_to_area(
     area_height: float,
     margin: float,
 ) -> tuple[list[Polyline], float, float]:
+    return fit_paths_to_box(paths, 0.0, 0.0, area_width, area_height, margin)
+
+
+def fit_paths_to_box(
+    paths: list[Polyline],
+    box_x: float,
+    box_y: float,
+    box_width: float,
+    box_height: float,
+    margin: float,
+) -> tuple[list[Polyline], float, float]:
     min_x, min_y, max_x, max_y = path_bounds(paths)
     source_width = max_x - min_x
     source_height = max_y - min_y
-    usable_width = max(1.0, area_width - margin * 2)
-    usable_height = max(1.0, area_height - margin * 2)
+    usable_width = max(1.0, box_width - margin * 2)
+    usable_height = max(1.0, box_height - margin * 2)
     scale = min(usable_width / source_width, usable_height / source_height)
     fitted_width = source_width * scale
     fitted_height = source_height * scale
-    offset_x = margin + (usable_width - fitted_width) / 2
-    offset_y = margin + (usable_height - fitted_height) / 2
+    offset_x = box_x + margin + (usable_width - fitted_width) / 2
+    offset_y = box_y + margin + (usable_height - fitted_height) / 2
     return transform_paths(paths, scale, offset_x, offset_y), fitted_width, fitted_height
 
 
@@ -85,7 +96,11 @@ def import_svg(path: str) -> SvgImportResult:
 
     paths = _collect_paths(root, _identity_matrix())
 
-    normalized = [_normalize(polyline, offset_x, offset_y, scale_x, scale_y) for polyline in paths if len(polyline) >= 2]
+    normalized = [
+        _normalize(polyline, offset_x, offset_y, scale_x, scale_y, height)
+        for polyline in paths
+        if len(polyline) >= 2
+    ]
     if not normalized:
         raise ValueError(f"Keine unterstuetzte SVG-Geometrie gefunden: {Path(path).name}")
 
@@ -370,8 +385,22 @@ def _quadratic_points(p0: Point, p1: Point, p2: Point, steps: int = 12) -> Polyl
     return points
 
 
-def _normalize(polyline: Polyline, offset_x: float, offset_y: float, scale_x: float, scale_y: float) -> Polyline:
-    return [((x - offset_x) * scale_x, (y - offset_y) * scale_y) for x, y in polyline]
+def _normalize(
+    polyline: Polyline,
+    offset_x: float,
+    offset_y: float,
+    scale_x: float,
+    scale_y: float,
+    height_mm: float,
+) -> Polyline:
+    """Convert SVG top-left/Y-down coordinates once into GRBL lower-left/Y-up."""
+    return [
+        (
+            (x - offset_x) * scale_x,
+            height_mm - (y - offset_y) * scale_y,
+        )
+        for x, y in polyline
+    ]
 
 
 def _float_attr(element: ET.Element, name: str) -> float:

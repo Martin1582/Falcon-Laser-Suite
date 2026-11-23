@@ -1,120 +1,88 @@
+"""Hauptfenster der Laser-Control-Oberflaeche (Aufbau, Layout, Vorschau).
+
+Fachlogik liegt in den window_*-Mixins."""
+
 import sys
 import threading
 from collections.abc import Callable
-
-from PySide6.QtCore import QObject, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
-    QFileDialog,
-    QFormLayout,
     QFrame,
     QGridLayout,
     QGroupBox,
+    QHeaderView,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QMainWindow,
-    QMessageBox,
     QPushButton,
-    QProgressBar,
     QRadioButton,
+    QScrollArea,
     QSizePolicy,
     QSpinBox,
     QSplitter,
+    QTabWidget,
+    QTableWidget,
     QTextEdit,
-    QToolBox,
     QVBoxLayout,
     QWidget,
 )
-
-from laser_control.gcode import (
-    CUT_MODE,
-    ENGRAVE_MODE,
-    build_polyline_gcode,
-    build_rectangle_frame_gcode,
-)
-from laser_control.laser import SimulatedLaserController
-from laser_control.job_history import (
-    JobHistoryEntry,
-    append_job_history,
-    export_job_history,
-    import_job_history,
-    load_job_history,
-    now_timestamp,
-)
-from laser_control.material_db import delete_material, find_material, load_materials, upsert_material
-from laser_control.models import MaterialProfile
+from laser_control.application_controller import ApplicationController
+from laser_control.artwork_import import ArtworkImportService, RasterImageSource
+from laser_control.artwork_scaling import AutoFitResult, AutoFitService
+from laser_control.artwork_transform import ArtworkTransform
+from laser_control.console_log_panel import ConsoleLogPanel
+from laser_control.diagnostic_log import DiagnosticLog
+from laser_control.gcode import CUT_MODE, ENGRAVE_MODE
+from laser_control.fill_toolpath import FillToolpath
+from laser_control.job_history import load_job_history
+from laser_control.laser_intelligence_engine import LaserIntelligenceEngine, LaserIntelligenceResult
+from laser_control.machine_actions import MachineActionRegistry
+from laser_control.machine_log import MachineActionLog
+from laser_control.machine_panel import MachinePanel
+from laser_control.machine_profiles import MachineProfileRepository
+from laser_control.material_db import load_materials
 from laser_control.profiles import DEFAULT_PROFILES
-from laser_control.project import load_project, project_to_dict, save_project
-from laser_control.serial_autodetect import find_laser_port
-from laser_control.serial_grbl import GrblSerialController, list_serial_ports
+from laser_control.preview_model import (
+    JobPreviewModel,
+    PreviewHeadPosition,
+    PreviewOptions,
+    build_multi_item_preview_model,
+    build_preview_model,
+)
+from laser_control.qt_panels import LayerPanel, WorkspaceScanPanel
+from laser_control.project import LaserProject
 from laser_control.services.assistant_service import AssistantService
-from laser_control.services.job_service import JobPreparation, JobService
+from laser_control.services.job_service import JobService
 from laser_control.services.profile_service import ProfileService
-from laser_control.svg_import import fit_paths_to_area, import_svg, scale_paths_to_width
+from laser_control.status_panel import StatusPanel
+from laser_control.svg_optimization import SvgOptimizationResult, SvgVectorAnalysis
+from laser_control.workflow_controller import WorkflowController
+from laser_control.window_machine import MachineControlMixin
+from laser_control.window_job import JobMixin
+from laser_control.window_materials import MaterialMixin
+from laser_control.window_artwork import ArtworkMixin
+from laser_control.window_project import ProjectMixin
+from laser_control.window_status import StatusSummaryMixin
+from laser_control.window_theme import ThemeMixin
+from laser_control.ui_common import WorkerSignals
+from laser_control.work_area_preview import WorkAreaPreview
+from laser_control.ui_common import AUTO_FIT_MARGIN_MM, JOB_ORIGIN_CENTER, JOB_ORIGIN_LOWER_LEFT, MATERIAL_SHAPE_CIRCLE, MATERIAL_SHAPE_RECTANGLE, WorkerSignals
 
 
-class WorkerSignals(QObject):
-    log = Signal(str)
-    progress = Signal(str, int, int)
-    error = Signal(str)
-    finished = Signal()
-    port_detected = Signal(str)
-
-
-class WorkAreaPreview(QWidget):
-    def __init__(self) -> None:
-        super().__init__()
-        self.setMinimumSize(360, 300)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.width_mm = 300.0
-        self.height_mm = 200.0
-        self.paths = []
-
-    def set_preview(self, width_mm: float, height_mm: float, paths: list) -> None:
-        self.width_mm = max(1.0, width_mm)
-        self.height_mm = max(1.0, height_mm)
-        self.paths = paths
-        self.update()
-
-    def paintEvent(self, _event) -> None:  # noqa: N802 - Qt override
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), QColor("#f7f7f7"))
-
-        margin = 18
-        available_w = max(1, self.width() - margin * 2)
-        available_h = max(1, self.height() - margin * 2)
-        scale = min(available_w / self.width_mm, available_h / self.height_mm)
-        area_w = self.width_mm * scale
-        area_h = self.height_mm * scale
-        origin_x = (self.width() - area_w) / 2
-        origin_y = (self.height() - area_h) / 2
-
-        painter.setPen(QPen(QColor("#9aa0a6"), 1))
-        painter.drawRect(int(origin_x), int(origin_y), int(area_w), int(area_h))
-
-        if self.paths:
-            painter.setPen(QPen(QColor("#d93025"), 2))
-            for polyline in self.paths:
-                for index in range(1, len(polyline)):
-                    x1, y1 = polyline[index - 1]
-                    x2, y2 = polyline[index]
-                    painter.drawLine(
-                        int(origin_x + x1 * scale),
-                        int(origin_y + y1 * scale),
-                        int(origin_x + x2 * scale),
-                        int(origin_y + y2 * scale),
-                    )
-        else:
-            painter.setPen(QPen(QColor("#d93025"), 2))
-            painter.drawRect(int(origin_x), int(origin_y), int(area_w), int(area_h))
-
-
-class LaserControlWindow(QMainWindow):
+class LaserControlWindow(
+    MachineControlMixin,
+    JobMixin,
+    MaterialMixin,
+    ArtworkMixin,
+    ProjectMixin,
+    StatusSummaryMixin,
+    ThemeMixin,
+    QMainWindow,
+):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Laser Control")
@@ -124,18 +92,61 @@ class LaserControlWindow(QMainWindow):
         self.imported_paths = []
         self.original_imported_paths = []
         self.imported_file = None
+        self.artwork_source = None
+        self.artwork_transform: ArtworkTransform | None = None
+        self.laser_project = LaserProject(300.0, 200.0)
+        self.selected_artwork_item_id: str | None = None
+        self._object_list_updating = False
+        self._item_sources: dict[str, object] = {}
+        self._item_vector_paths: dict[str, list] = {}
+        self._item_optimized_vector_paths: dict[str, list] = {}
+        self._item_svg_analyses: dict[str, SvgVectorAnalysis] = {}
+        self._item_svg_optimization_results: dict[str, SvgOptimizationResult] = {}
+        self._item_original_rasters: dict[str, RasterImageSource] = {}
+        self._fill_toolpaths_by_item: dict[str, list[FillToolpath]] = {}
+        self.svg_optimized_paths: list = []
+        self.svg_analysis: SvgVectorAnalysis | None = None
+        self.svg_optimization_result: SvgOptimizationResult | None = None
+        self.laser_intelligence_engine = LaserIntelligenceEngine()
+        self.laser_intelligence_result: LaserIntelligenceResult | None = None
+        self._item_intelligence_results: dict[str, LaserIntelligenceResult] = {}
+        self.raster_sources: list[RasterImageSource] = []
+        self.original_raster_source: RasterImageSource | None = None
+        self.autofit_result: AutoFitResult | None = None
+        self.fill_toolpaths: list[FillToolpath] = []
         self.material_point_a = None
         self.material_point_b = None
+        self.material_points = {1: None, 2: None, 3: None, 4: None}
         self.material_measurement = None
         self.current_project_path = None
         self.material_db_records = load_materials()
         self.profile_service = ProfileService()
         self.job_service = JobService()
+        self.import_service = ArtworkImportService()
+        self.autofit_service = AutoFitService()
         self.assistant_service = AssistantService()
+        self.diagnostic_log = DiagnosticLog()
+        self.machine_action_registry = MachineActionRegistry()
+        self.action_buttons: dict[str, list[QPushButton]] = {}
+        self.app_controller = ApplicationController(
+            self._threadsafe_log,
+            self._threadsafe_progress,
+            lambda: self.serial_port.currentText() if hasattr(self, "serial_port") else "",
+            self.diagnostic_log,
+        )
+        self.machine_action_log = MachineActionLog()
+        self.workflow = WorkflowController(self.job_service, self.machine_action_log, self.log)
+        self.machine_profile_repository = MachineProfileRepository()
+        self.machine_profile = self.machine_profile_repository.active_profile()
         self.job_history = load_job_history()
         self.material_profiles = self.profile_service.material_profiles
         self.last_prepared_job = None
+        self.dark_mode_enabled = True
         self.worker_busy = False
+        self._parameter_source = "Materialprofil/Default"
+        self._closing = False
+        self._transform_ui_updating = False
+        self._worker_threads: list[threading.Thread] = []
 
         self.signals = WorkerSignals()
         self.signals.log.connect(self.log)
@@ -143,16 +154,31 @@ class LaserControlWindow(QMainWindow):
         self.signals.error.connect(self._show_worker_error)
         self.signals.finished.connect(self._worker_finished)
         self.signals.port_detected.connect(self._apply_detected_port)
+        self._machine_state_timer = QTimer(self)
+        self._machine_state_timer.setInterval(250)
+        self._machine_state_timer.timeout.connect(self._sync_position_indicator)
+        self._machine_state_timer.start()
 
-        self.controller = SimulatedLaserController(self._threadsafe_log, self._threadsafe_progress)
+        self.controller = self.app_controller.controller
         self.active_connection_mode = "Simulator"
 
         self._build_layout()
+        self.log(f"Materialprofile Speicherpfad: {self.profile_service.storage_path}")
+        self.log(f"Materialprofile geladen: {len(self.profile_service.names())}")
+        if self.machine_profile_repository.load_error:
+            self.log(f"Maschinenprofile konnten nicht geladen werden, Default wird genutzt: {self.machine_profile_repository.load_error}")
+        self._apply_machine_profile(self.machine_profile)
+        self.log(f"Maschinenprofil geladen: {self.machine_profile.name}")
         self._refresh_material_db_combo()
         self._apply_mode_profile_to_controls()
+        self._sync_layers_from_controls(preserve_states=False)
         self._refresh_ports()
         self._refresh_gcode()
         self._draw_preview()
+        self._sync_connection_indicator()
+        self.diagnostic_log.event("App gestartet.")
+        self.diagnostic_log.event(f"Diagnose-Log: {self.diagnostic_log.path}")
+        self.log(f"Diagnose-Log aktiv: {self.diagnostic_log.path}")
 
     def _build_layout(self) -> None:
         root = QWidget()
@@ -162,18 +188,35 @@ class LaserControlWindow(QMainWindow):
 
         self._build_action_bar(root_layout)
 
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        root_layout.addWidget(splitter, 1)
+        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.main_splitter.setChildrenCollapsible(False)
+        root_layout.addWidget(self.main_splitter, 1)
 
-        self.sidebar_toolbox = QToolBox()
-        self.sidebar_toolbox.setMinimumWidth(280)
-        self.sidebar_toolbox.setMaximumWidth(340)
-        splitter.addWidget(self.sidebar_toolbox)
+        self.left_sidebar = QWidget()
+        self.left_sidebar.setObjectName("leftSidebar")
+        self.left_sidebar.setMinimumWidth(300)
+        self.left_sidebar.setMaximumWidth(340)
+        left_layout = QVBoxLayout(self.left_sidebar)
+        left_layout.setContentsMargins(0, 0, 6, 0)
+        left_layout.setSpacing(0)
+        self.sidebar_toolbox = QWidget()
+        self.sidebar_toolbox.setObjectName("sidebarSections")
+        self.sidebar_scroll = QScrollArea()
+        self.sidebar_scroll.setWidgetResizable(True)
+        self.sidebar_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.sidebar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.sidebar_scroll.setWidget(self.sidebar_toolbox)
+        left_layout.addWidget(self.sidebar_scroll)
+        self.main_splitter.addWidget(self.left_sidebar)
+        self.sidebar_combos = []
 
         content = QWidget()
         content_layout = QVBoxLayout(content)
-        splitter.addWidget(content)
-        splitter.setStretchFactor(1, 1)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_splitter.addWidget(content)
+        self.main_splitter.setStretchFactor(0, 0)
+        self.main_splitter.setStretchFactor(1, 5)
+        self.main_splitter.setSizes([320, 1380])
 
         self._build_sidebar(self.sidebar_toolbox)
         self._build_content(content_layout)
@@ -182,143 +225,325 @@ class LaserControlWindow(QMainWindow):
     def _build_action_bar(self, layout: QVBoxLayout) -> None:
         action_bar = QFrame()
         action_layout = QHBoxLayout(action_bar)
-        action_layout.setContentsMargins(0, 0, 0, 8)
+        action_layout.setContentsMargins(0, 0, 0, 4)
         action_layout.setSpacing(8)
-        action_layout.addWidget(self._button("Verbinden", lambda: self._run_controller_action(lambda c: c.connect())))
-        action_layout.addWidget(self._button("Laser suchen", self._auto_detect_laser))
-        action_layout.addWidget(self._button("Home", lambda: self._run_controller_action(lambda c: c.home())))
-        action_layout.addWidget(self._button("Rahmen", self._frame_job))
-        action_layout.addWidget(self._button("Dry Run", self._dry_run_job))
-        start_button = self._button("Start", self._start_job)
-        start_button.setObjectName("primaryStartButton")
-        start_button.setStyleSheet("#primaryStartButton { font-weight: 700; }")
-        action_layout.addWidget(start_button)
-        action_layout.addWidget(self._button("Stop", lambda: self._run_controller_action(lambda c: c.stop(), True)))
+        self.workflow_hint = QLabel(
+            "Maschine  >  Projekt & Material  >  Layer  >  Vorschau / Frame  >  Preflight / Start"
+        )
+        self.workflow_hint.setObjectName("workflowHint")
+        self.workflow_hint.setWordWrap(True)
+        self.workflow_hint.setMaximumHeight(42)
+        action_layout.addWidget(self.workflow_hint, 1)
         action_layout.addStretch(1)
+        self.theme_switch = QCheckBox("Dark")
+        self.theme_switch.setChecked(True)
+        self.theme_switch.toggled.connect(self._apply_theme)
+        action_layout.addWidget(self.theme_switch)
         layout.addWidget(action_bar)
 
-    def _build_sidebar(self, toolbox: QToolBox) -> None:
+    def _add_sidebar_section(self, container_layout: QVBoxLayout, title: str, body: QWidget, expanded: bool) -> QGroupBox:
+        section = QGroupBox(title)
+        section.setObjectName("sidebarSection")
+        section.setCheckable(True)
+        section.setChecked(expanded)
+        section_layout = QVBoxLayout(section)
+        section_layout.setContentsMargins(8, 10, 8, 8)
+        section_layout.setSpacing(6)
+        section_layout.addWidget(body)
+        body.setVisible(expanded)
+        section.toggled.connect(body.setVisible)
+        container_layout.addWidget(section)
+        self.sidebar_sections[title] = section
+        return section
+
+    def _build_sidebar(self, toolbox: QWidget) -> None:
+        sidebar_layout = QVBoxLayout(toolbox)
+        sidebar_layout.setContentsMargins(6, 6, 6, 10)
+        sidebar_layout.setSpacing(8)
+        self.sidebar_sections: dict[str, QGroupBox] = {}
+
         machine_page = QWidget()
         machine_layout = QVBoxLayout(machine_page)
-        machine_layout.setContentsMargins(8, 8, 8, 8)
-        machine_layout.setSpacing(8)
+        machine_layout.setContentsMargins(0, 0, 0, 0)
+        machine_layout.setSpacing(4)
 
-        connection = QGroupBox("Verbindung")
-        form = QVBoxLayout(connection)
-        form.setSpacing(5)
-        self.connection_label = QLabel("Nicht verbunden")
-        form.addWidget(self.connection_label)
-        self.connection_mode = QComboBox()
-        self.connection_mode.addItems(["Simulator", "GRBL ueber USB"])
-        self.connection_mode.currentTextChanged.connect(self._switch_controller)
-        form.addWidget(self.connection_mode)
-        self.serial_port = QComboBox()
-        form.addWidget(self.serial_port)
-        form.addWidget(self._button("Ports suchen", self._refresh_ports))
-        form.addWidget(self._button("Laser automatisch finden", self._auto_detect_laser))
-        form.addWidget(self._button("Verbinden", lambda: self._run_controller_action(lambda c: c.connect())))
-        form.addWidget(self._button("Trennen", lambda: self._run_controller_action(lambda c: c.disconnect())))
-        form.addWidget(self._button("Referenzfahrt", lambda: self._run_controller_action(lambda c: c.home())))
-        form.addWidget(self._button("Status abfragen", self._query_status))
-        form.addWidget(self._button("GRBL Settings", self._query_settings))
-        machine_layout.addWidget(connection)
+        self.machine_panel = MachinePanel(self.machine_action_registry)
+        self.connection_label = self.machine_panel.connection_label
+        self.connection_mode = self.machine_panel.connection_mode
+        self.serial_port = self.machine_panel.serial_port
+        self._configure_sidebar_combo(self.connection_mode)
+        self._configure_sidebar_combo(self.serial_port)
+        self.machine_panel.mode_changed.connect(self._switch_controller)
+        self.machine_panel.action_triggered.connect(self._trigger_machine_action)
+        self.machine_panel.profile_changed.connect(self._machine_profile_changed)
+        self.machine_panel.profile_editor_requested.connect(self._edit_machine_profiles)
+        self.machine_panel.set_machine_profiles(
+            self.machine_profile_repository.profiles(),
+            self.machine_profile_repository.active_profile_id(),
+        )
+        for action_id, buttons in self.machine_panel.action_buttons.items():
+            self.action_buttons.setdefault(action_id, []).extend(buttons)
+        machine_layout.addWidget(self.machine_panel)
+        self._add_sidebar_section(sidebar_layout, "Maschine", machine_page, True)
 
-        jog_group = QGroupBox("Jog")
+        position_page = QWidget()
+        position_page_layout = QVBoxLayout(position_page)
+        position_page_layout.setContentsMargins(0, 0, 0, 0)
+        position_page_layout.setSpacing(6)
+        jog_group = QGroupBox("Position / Jog")
         jog = QGridLayout(jog_group)
-        jog.setHorizontalSpacing(6)
-        jog.setVerticalSpacing(6)
-        jog.addWidget(self._button("Y+", lambda: self._run_controller_action(lambda c: c.jog(0, 10))), 0, 1)
-        jog.addWidget(self._button("X-", lambda: self._run_controller_action(lambda c: c.jog(-10, 0))), 1, 0)
-        jog.addWidget(self._button("X+", lambda: self._run_controller_action(lambda c: c.jog(10, 0))), 1, 2)
-        jog.addWidget(self._button("Y-", lambda: self._run_controller_action(lambda c: c.jog(0, -10))), 2, 1)
-        machine_layout.addWidget(jog_group)
-        machine_layout.addStretch(1)
-        toolbox.addItem(machine_page, "Maschine")
+        jog.setContentsMargins(8, 8, 8, 8)
+        jog.setHorizontalSpacing(8)
+        jog.setVerticalSpacing(8)
+        for column in range(3):
+            jog.setColumnStretch(column, 1)
+        jog.addWidget(self._machine_action_button("jog_y_plus", "Sidebar"), 0, 1)
+        jog.addWidget(self._machine_action_button("jog_x_minus", "Sidebar"), 1, 0)
+        jog.addWidget(self._machine_action_button("jog_x_plus", "Sidebar"), 1, 2)
+        jog.addWidget(self._machine_action_button("jog_y_minus", "Sidebar"), 2, 1)
+        position_page_layout.addWidget(jog_group)
+        alignment_group = QGroupBox("Material ausrichten")
+        alignment_layout = QVBoxLayout(alignment_group)
+        alignment_layout.setContentsMargins(8, 8, 8, 8)
+        alignment_layout.setSpacing(6)
+        self.alignment_power = self._spin(1, 5, 1, suffix=" %")
+        self.alignment_power.setToolTip("Sichere Pointer-Leistung, maximal 5%. Niemals Materialprofil-Power.")
+        self.alignment_power.valueChanged.connect(self._alignment_power_changed)
+        self.alignment_status = QLabel("Ausrichtmodus aus")
+        self.alignment_status.setWordWrap(True)
+        alignment_layout.addWidget(QLabel("Pointer-Leistung"))
+        alignment_layout.addWidget(self.alignment_power)
+        alignment_layout.addWidget(self._machine_action_button("toggle_alignment", "Sidebar"))
+        alignment_layout.addWidget(self.alignment_status)
+        self.workspace_scan_panel = WorkspaceScanPanel(
+            self._machine_action_button("toggle_work_area_trace", "Sidebar"),
+            self._button("Pointer 2s testen", self._test_alignment_pointer),
+        )
+        self.work_area_trace_status = self.workspace_scan_panel.status_label
+        alignment_layout.addWidget(self.workspace_scan_panel)
+        position_page_layout.addWidget(alignment_group)
+        self._add_sidebar_section(sidebar_layout, "Positionierung", position_page, False)
 
-        material_page = QWidget()
-        material_page_layout = QVBoxLayout(material_page)
-        material_page_layout.setContentsMargins(8, 8, 8, 8)
-        material_page_layout.setSpacing(8)
+        project_page = QWidget()
+        project_page_layout = QVBoxLayout(project_page)
+        project_page_layout.setContentsMargins(0, 0, 0, 0)
+        project_page_layout.setSpacing(6)
+
+        project = QGroupBox("Projekt")
+        project_layout = QVBoxLayout(project)
+        project_layout.setContentsMargins(8, 8, 8, 8)
+        project_layout.setSpacing(6)
+        project_layout.addWidget(self._button("Datei importieren", self._import_svg))
+        self.object_table = QTableWidget(0, 4)
+        self.object_table.setHorizontalHeaderLabels(["S", "A", "Name", "Typ"])
+        self.object_table.verticalHeader().setVisible(False)
+        self.object_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.object_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.object_table.setMinimumHeight(120)
+        self.object_table.setMaximumHeight(180)
+        self.object_table.setColumnWidth(0, 28)
+        self.object_table.setColumnWidth(1, 28)
+        self.object_table.setColumnWidth(3, 64)
+        self.object_table.horizontalHeader().setStretchLastSection(False)
+        self.object_table.horizontalHeader().setMinimumSectionSize(26)
+        self.object_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        self.object_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        self.object_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.object_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        self.object_table.itemChanged.connect(self._object_table_item_changed)
+        self.object_table.itemSelectionChanged.connect(self._object_table_selection_changed)
+        project_layout.addWidget(self.object_table)
+        self.project_empty_state = QLabel("Noch keine Motive vorhanden.\nJetzt erstes Motiv importieren.")
+        self.project_empty_state.setObjectName("projectEmptyState")
+        self.project_empty_state.setWordWrap(True)
+        project_layout.addWidget(self.project_empty_state)
+        project_layout.addWidget(self._button("Speichern", self._save_project))
+        project_layout.addWidget(self._button("Laden", self._load_project))
+        project_page_layout.addWidget(project)
+
         material = QGroupBox("Material")
         material_layout = QVBoxLayout(material)
-        material_layout.setSpacing(5)
+        material_layout.setContentsMargins(8, 8, 8, 8)
+        material_layout.setSpacing(6)
         self.material_measurement_label = QLabel("Nicht eingemessen")
         self.material_measurement_label.setWordWrap(True)
         material_layout.addWidget(self.material_measurement_label)
         material_layout.addWidget(self._button("Ecke 1 setzen", lambda: self._capture_material_point(1)))
         material_layout.addWidget(self._button("Ecke 2 setzen", lambda: self._capture_material_point(2)))
+        material_layout.addWidget(self._button("Ecke 3 setzen", lambda: self._capture_material_point(3)))
+        material_layout.addWidget(self._button("Ecke 4 setzen", lambda: self._capture_material_point(4)))
         material_layout.addWidget(self._button("Groesse uebernehmen", self._apply_material_measurement))
         self.material_db_name = QComboBox()
         self.material_db_name.setEditable(True)
+        self._configure_sidebar_combo(self.material_db_name)
         material_layout.addWidget(QLabel("Name"))
         material_layout.addWidget(self.material_db_name)
-        size_row = QHBoxLayout()
-        self.material_db_width = self._double_spin(0, 2000, 0)
-        self.material_db_height = self._double_spin(0, 2000, 0)
-        size_row.addWidget(QLabel("B"))
-        size_row.addWidget(self.material_db_width)
-        size_row.addWidget(QLabel("H"))
-        size_row.addWidget(self.material_db_height)
-        material_layout.addLayout(size_row)
+        size_grid = QGridLayout()
+        size_grid.setHorizontalSpacing(8)
+        size_grid.setVerticalSpacing(4)
+        self.material_db_width = self._double_spin(0, 2000, 0, " mm")
+        self.material_db_height = self._double_spin(0, 2000, 0, " mm")
+        size_grid.addWidget(QLabel("Breite"), 0, 0)
+        size_grid.addWidget(self.material_db_width, 0, 1)
+        size_grid.addWidget(QLabel("Hoehe"), 1, 0)
+        size_grid.addWidget(self.material_db_height, 1, 1)
+        size_grid.setColumnStretch(1, 1)
+        material_layout.addLayout(size_grid)
         material_layout.addWidget(self._button("Material speichern", self._save_measured_material))
         self.material_db_selection = QComboBox()
+        self._configure_sidebar_combo(self.material_db_selection)
         self.material_db_selection.currentTextChanged.connect(lambda _text: self._select_material_record())
         material_layout.addWidget(self.material_db_selection)
         material_layout.addWidget(self._button("Material laden", self._load_measured_material))
         material_layout.addWidget(self._button("Material loeschen", self._delete_measured_material))
-        material_page_layout.addWidget(material)
-        material_page_layout.addStretch(1)
-        toolbox.addItem(material_page, "Material")
+        project_page_layout.addWidget(material)
+        self._add_sidebar_section(sidebar_layout, "Projekt", project_page, False)
 
         job_page = QWidget()
         job_page_layout = QVBoxLayout(job_page)
-        job_page_layout.setContentsMargins(8, 8, 8, 8)
-        job_page_layout.setSpacing(8)
+        job_page_layout.setContentsMargins(0, 0, 0, 0)
+        job_page_layout.setSpacing(4)
         job = QGroupBox("Job")
         job_layout = QVBoxLayout(job)
-        job_layout.setSpacing(5)
+        job_layout.setContentsMargins(8, 8, 8, 8)
+        job_layout.setSpacing(7)
         self.operation_mode = QComboBox()
         self.operation_mode.addItems([ENGRAVE_MODE, CUT_MODE])
+        self._configure_sidebar_combo(self.operation_mode)
         self.operation_mode.currentTextChanged.connect(self._on_operation_mode_changed)
         job_layout.addWidget(QLabel("Modus"))
         job_layout.addWidget(self.operation_mode)
-        job_layout.addWidget(self._button("Rahmen fahren", self._frame_job))
-        job_layout.addWidget(self._button("Dry Run", self._dry_run_job))
-        job_layout.addWidget(self._button("Start", self._start_job))
-        job_layout.addWidget(self._button("Pause", lambda: self._run_controller_action(lambda c: c.pause(), True)))
-        job_layout.addWidget(self._button("Fortsetzen", lambda: self._run_controller_action(lambda c: c.resume(), True)))
-        job_layout.addWidget(self._button("Stop", lambda: self._run_controller_action(lambda c: c.stop(), True)))
+        job_layout.addWidget(QLabel("Job-Art"))
+        self.job_kind = QComboBox()
+        self.job_kind.addItems(["Einzelstueck"])
+        self._configure_sidebar_combo(self.job_kind)
+        job_layout.addWidget(self.job_kind)
+        self.auto_home_after_job = QCheckBox("Auto-Home nach Einzelstueck")
+        self.auto_home_after_job.setToolTip("Nach erfolgreichem Einzelstueck automatisch Home anfahren.")
+        self.auto_home_after_job.setChecked(True)
+        self.auto_home_after_job.toggled.connect(lambda _checked: self._settings_changed())
+        job_layout.addWidget(self.auto_home_after_job)
+        job_layout.addWidget(self._machine_action_button("frame", "Sidebar"))
+        job_layout.addWidget(self._machine_action_button("dry_run", "Sidebar"))
+        job_layout.addWidget(self._machine_action_button("start_job", "Sidebar"))
+        pause_row = QHBoxLayout()
+        pause_row.setSpacing(8)
+        pause_row.addWidget(self._machine_action_button("pause", "Sidebar"))
+        pause_row.addWidget(self._machine_action_button("resume", "Sidebar"))
+        job_layout.addLayout(pause_row)
+        job_layout.addWidget(self._machine_action_button("stop", "Sidebar"))
+        job_layout.addWidget(self._machine_action_button("emergency_stop", "Sidebar"))
+        job_layout.addWidget(self._machine_action_button("unlock_alarm", "Sidebar"))
         job_page_layout.addWidget(job)
+        self._add_sidebar_section(sidebar_layout, "Job", job_page, True)
 
-        project = QGroupBox("Projekt")
-        project_layout = QVBoxLayout(project)
-        project_layout.setSpacing(5)
-        project_layout.addWidget(self._button("SVG importieren", self._import_svg))
-        project_layout.addWidget(self._button("Speichern", self._save_project))
-        project_layout.addWidget(self._button("Laden", self._load_project))
-        project_layout.addWidget(self._button("Profile exportieren", self._export_profiles))
-        project_layout.addWidget(self._button("Profile importieren", self._import_profiles))
-        job_page_layout.addWidget(project)
+        diagnostics_page = QWidget()
+        diagnostics_layout = QVBoxLayout(diagnostics_page)
+        diagnostics_layout.setContentsMargins(0, 0, 0, 0)
+        diagnostics_layout.setSpacing(6)
+        machine_diagnostics = QGroupBox("Maschinendiagnose")
+        machine_diagnostics_layout = QVBoxLayout(machine_diagnostics)
+        machine_diagnostics_layout.setContentsMargins(8, 8, 8, 8)
+        machine_diagnostics_layout.setSpacing(6)
+        machine_diagnostics_layout.addWidget(self._machine_action_button("status", "Diagnose"))
+        machine_diagnostics_layout.addWidget(self._machine_action_button("settings", "Diagnose"))
+        machine_diagnostics_layout.addWidget(self._button("Diagnose exportieren", self._export_diagnostics))
+        diagnostics_layout.addWidget(machine_diagnostics)
 
-        intelligence = QGroupBox("Assistenz")
-        intelligence_layout = QVBoxLayout(intelligence)
-        intelligence_layout.setSpacing(5)
-        intelligence_layout.addWidget(self._button("Analysieren", lambda: self._update_assistant_panel()))
-        intelligence_layout.addWidget(self._button("Testmatrix erzeugen", self._generate_test_matrix))
-        intelligence_layout.addWidget(self._button("Als gut speichern", lambda: self._record_job_result("good")))
-        intelligence_layout.addWidget(self._button("Problem speichern", lambda: self._record_job_result("problem")))
-        intelligence_layout.addWidget(self._button("Historie exportieren", self._export_history))
-        intelligence_layout.addWidget(self._button("Historie importieren", self._import_history))
-        job_page_layout.addWidget(intelligence)
-        job_page_layout.addStretch(1)
-        toolbox.addItem(job_page, "Job")
+        svg_quality = QGroupBox("SVG-Optimierung")
+        svg_quality_layout = QVBoxLayout(svg_quality)
+        svg_quality_layout.setContentsMargins(8, 8, 8, 8)
+        svg_quality_layout.setSpacing(6)
+        self.svg_simplify_enabled = QCheckBox("Konturen vereinfachen")
+        self.svg_simplify_enabled.setToolTip("Douglas-Peucker-Vereinfachung auf SVG-Pfadpunkte anwenden. Originaldatei bleibt unveraendert.")
+        self.svg_simplify_enabled.toggled.connect(lambda _checked: self._svg_optimization_changed())
+        self.svg_tolerance = QComboBox()
+        for tolerance in (0.01, 0.02, 0.05, 0.10):
+            self.svg_tolerance.addItem(f"{tolerance:.2f} mm", tolerance)
+        self.svg_tolerance.setCurrentIndex(1)
+        self.svg_tolerance.setToolTip("Empfehlung fuer feine Falcon-10W-Motive: 0.02 mm oder 0.05 mm.")
+        self.svg_tolerance.currentIndexChanged.connect(lambda _index: self._svg_optimization_changed())
+        self._configure_sidebar_combo(self.svg_tolerance)
+        self.svg_remove_duplicates = QCheckBox("Doppelte Linien entfernen")
+        self.svg_remove_duplicates.setToolTip("Nahezu identische Liniensegmente optional nur einmal gravieren.")
+        self.svg_remove_duplicates.toggled.connect(lambda _checked: self._svg_optimization_changed())
+        self.svg_show_analysis = QCheckBox("Analyse anzeigen")
+        self.svg_show_analysis.setChecked(True)
+        self.svg_show_analysis.toggled.connect(lambda _checked: self._update_import_summary())
+        self.svg_analysis_label = QLabel("Keine SVG-Analyse")
+        self.svg_analysis_label.setWordWrap(True)
+        self.laser_intelligence_label = QLabel("Laser Intelligence: keine Analyse")
+        self.laser_intelligence_label.setWordWrap(True)
+        svg_quality_layout.addWidget(self.svg_simplify_enabled)
+        svg_quality_layout.addWidget(QLabel("Toleranz"))
+        svg_quality_layout.addWidget(self.svg_tolerance)
+        svg_quality_layout.addWidget(self.svg_remove_duplicates)
+        svg_quality_layout.addWidget(self.svg_show_analysis)
+        svg_quality_layout.addWidget(self.svg_analysis_label)
+        svg_quality_layout.addWidget(self.laser_intelligence_label)
+        diagnostics_layout.addWidget(svg_quality)
+
+        expert_tools = QGroupBox("Expertenfunktionen")
+        expert_layout = QVBoxLayout(expert_tools)
+        expert_layout.setContentsMargins(8, 8, 8, 8)
+        expert_layout.setSpacing(6)
+        expert_layout.addWidget(self._button("Profile exportieren", self._export_profiles))
+        expert_layout.addWidget(self._button("Profile importieren", self._import_profiles))
+        expert_layout.addWidget(self._button("Testmatrix erzeugen", self._generate_test_matrix))
+        expert_layout.addWidget(self._button("Als gut speichern", lambda: self._record_job_result("good")))
+        expert_layout.addWidget(self._button("Problem speichern", lambda: self._record_job_result("problem")))
+        expert_layout.addWidget(self._button("Historie exportieren", self._export_history))
+        expert_layout.addWidget(self._button("Historie importieren", self._import_history))
+        diagnostics_layout.addWidget(expert_tools)
+        self._add_sidebar_section(sidebar_layout, "Diagnose", diagnostics_page, False)
+        sidebar_layout.addStretch(1)
 
     def _build_content(self, layout: QVBoxLayout) -> None:
+        self.workspace_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.workspace_splitter.setChildrenCollapsible(False)
+        layout.addWidget(self.workspace_splitter, 1)
+
+        main_panel = QWidget()
+        main_layout = QVBoxLayout(main_panel)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        self.workspace_splitter.addWidget(main_panel)
+
+        self.right_sidebar = QWidget()
+        self.right_sidebar.setObjectName("rightSidebar")
+        self.right_sidebar.setMinimumWidth(320)
+        self.right_sidebar.setMaximumWidth(350)
+        right_layout = QVBoxLayout(self.right_sidebar)
+        right_layout.setContentsMargins(8, 0, 0, 0)
+        right_layout.setSpacing(8)
+        self.workspace_splitter.addWidget(self.right_sidebar)
+        self.workspace_splitter.setStretchFactor(0, 7)
+        self.workspace_splitter.setStretchFactor(1, 2)
+        self.workspace_splitter.setSizes([1120, 330])
+
+        layout = main_layout
+
+        workflow_group = QFrame()
+        workflow_group.setObjectName("workflowStrip")
+        workflow_layout = QVBoxLayout(workflow_group)
+        workflow_layout.setContentsMargins(6, 4, 6, 4)
+        self.workflow_status = QLabel("1 Maschine verbinden -> 2 Homing -> 3 Material -> 4 Datei -> 5 Layer -> 6 Vorschau -> 7 Frame -> 8 Preflight -> 9 Start")
+        self.workflow_status.setObjectName("workflowStatus")
+        self.workflow_status.setWordWrap(True)
+        self.workflow_status.setMaximumHeight(58)
+        workflow_layout.addWidget(self.workflow_status)
+        layout.addWidget(workflow_group)
+
         settings = QFrame()
         settings_layout = QHBoxLayout(settings)
         settings_layout.setContentsMargins(0, 0, 0, 0)
-        self.work_width = self._double_spin(10, 2000, 300)
-        self.work_height = self._double_spin(10, 2000, 200)
+        self.work_width = self._double_spin(10, 2000, 300, " mm")
+        self.work_height = self._double_spin(10, 2000, 200, " mm")
+        self.material_shape = QComboBox()
+        self.material_shape.addItems([MATERIAL_SHAPE_RECTANGLE, MATERIAL_SHAPE_CIRCLE])
+        self.material_shape.currentTextChanged.connect(lambda _text: self._settings_changed())
+        self.job_origin = QComboBox()
+        self.job_origin.addItems([JOB_ORIGIN_LOWER_LEFT, JOB_ORIGIN_CENTER])
+        self.job_origin.currentTextChanged.connect(lambda _text: self._settings_changed())
         self.profile_name = QComboBox()
         self.profile_name.addItems(self.profile_service.names())
         self.profile_name.currentTextChanged.connect(lambda _text: self._profile_selected())
@@ -328,18 +553,25 @@ class LaserControlWindow(QMainWindow):
         settings_layout.addWidget(self.work_width)
         settings_layout.addWidget(QLabel("x"))
         settings_layout.addWidget(self.work_height)
-        settings_layout.addWidget(QLabel("mm"))
+        settings_layout.addSpacing(8)
+        settings_layout.addWidget(QLabel("Form"))
+        settings_layout.addWidget(self.material_shape)
+        settings_layout.addWidget(QLabel("Ursprung"))
+        settings_layout.addWidget(self.job_origin)
+        settings_layout.addSpacing(8)
         settings_layout.addSpacing(16)
         settings_layout.addWidget(QLabel("Material"))
         settings_layout.addWidget(self.profile_name, 1)
+        self.add_material_button = self._button("Material hinzufuegen", self._open_add_material_dialog)
+        settings_layout.addWidget(self.add_material_button)
         layout.addWidget(settings)
 
         material_settings = QFrame()
         material_layout = QHBoxLayout(material_settings)
         material_layout.setContentsMargins(0, 0, 0, 0)
-        self.power_percent = self._spin(0, 100, DEFAULT_PROFILES[0].power_percent)
-        self.speed_mm_min = self._spin(50, 12000, DEFAULT_PROFILES[0].speed_mm_min, 50)
-        self.passes = self._spin(1, 20, DEFAULT_PROFILES[0].passes)
+        self.power_percent = self._spin(0, 100, DEFAULT_PROFILES[0].power_percent, suffix=" %")
+        self.speed_mm_min = self._spin(50, 12000, DEFAULT_PROFILES[0].speed_mm_min, 50, " mm/min")
+        self.passes = self._spin(1, 20, DEFAULT_PROFILES[0].passes, suffix=" x")
         for widget in (self.power_percent, self.speed_mm_min, self.passes):
             widget.valueChanged.connect(self._material_settings_changed)
         material_layout.addWidget(QLabel("Leistung %"))
@@ -351,46 +583,141 @@ class LaserControlWindow(QMainWindow):
         material_layout.addStretch(1)
         layout.addWidget(material_settings)
 
-        self.job_summary = QLabel("Kein Job analysiert.")
+        self.material_summary = QLabel("Material: kein Profil gewaehlt")
+        self.material_summary.setObjectName("materialSummary")
+        self.material_summary.setWordWrap(True)
+        self.material_summary.setMaximumHeight(48)
+        layout.addWidget(self.material_summary)
+
+        self.layer_panel = LayerPanel(on_changed=self._layer_changed)
+        right_layout.addWidget(self.layer_panel)
+
+        self.project_summary = QLabel("Projekt: Noch keine Motive vorhanden. Jetzt erstes Motiv importieren.")
+        self.project_summary.setObjectName("projectSummary")
+        self.project_summary.setWordWrap(True)
+        self.project_summary.setMaximumHeight(48)
+        layout.addWidget(self.project_summary)
+
+        self.job_summary = QLabel("Naechster Schritt: Motiv importieren.")
+        self.job_summary.setObjectName("jobSummary")
         self.job_summary.setWordWrap(True)
+        self.job_summary.setMaximumHeight(48)
         layout.addWidget(self.job_summary)
 
         self.assistant_summary = QTextEdit()
         self.assistant_summary.setReadOnly(True)
-        self.assistant_summary.setMaximumHeight(120)
-        self.assistant_summary.setStyleSheet("background: #fbfbfb;")
-        layout.addWidget(self.assistant_summary)
+        self.assistant_summary.setMinimumHeight(105)
+        self.assistant_summary.setMaximumHeight(155)
+        self.assistant_summary.setObjectName("assistantSummary")
+        assistant_group = QGroupBox("Gefuehrter Check")
+        assistant_layout = QVBoxLayout(assistant_group)
+        assistant_layout.addWidget(self.assistant_summary)
+        right_layout.addWidget(assistant_group)
 
-        placement = QGroupBox("SVG Platzierung")
-        placement_layout = QGridLayout(placement)
+        placement = QGroupBox("Motiv transformieren")
+        placement.setVisible(False)
+        placement_container_layout = QVBoxLayout(placement)
+        placement_container_layout.setContentsMargins(6, 4, 6, 6)
+        placement_body = QWidget()
+        placement_layout = QGridLayout(placement_body)
+        placement_container_layout.addWidget(placement_body)
+        self.transform_group = placement
+        self.transform_body = placement_body
         self.svg_auto = QRadioButton("Automatisch")
         self.svg_manual = QRadioButton("Manuell")
         self.svg_auto.setChecked(True)
         self.svg_auto.toggled.connect(lambda _checked: self._apply_svg_placement())
-        self.svg_margin = self._double_spin(0, 50, 5)
-        self.svg_manual_width = self._double_spin(1, 400, 50)
-        self.svg_offset_x = self._double_spin(0, 400, 0)
-        self.svg_offset_y = self._double_spin(0, 415, 0)
-        for widget in (self.svg_margin, self.svg_manual_width, self.svg_offset_x, self.svg_offset_y):
-            widget.valueChanged.connect(lambda _value: self._apply_svg_placement())
+        self.svg_margin = self._double_spin(0, 50, AUTO_FIT_MARGIN_MM, " mm")
+        self.svg_manual_width = self._double_spin(0.1, 2000, 50, " mm")
+        self.artwork_height = self._double_spin(0.1, 2000, 50, " mm")
+        self.artwork_scale_percent = self._double_spin(0.1, 1000, 100, " %")
+        self.artwork_rotation = self._double_spin(-360, 360, 0, " deg")
+        self.artwork_keep_aspect = QCheckBox("Seitenverhaeltnis sperren")
+        self.artwork_keep_aspect.setChecked(True)
+        self.svg_offset_x = self._double_spin(-2000, 2000, 0, " mm")
+        self.svg_offset_y = self._double_spin(-2000, 2000, 0, " mm")
+        self.svg_margin.valueChanged.connect(lambda _value: self._apply_svg_placement())
+        self.svg_manual_width.valueChanged.connect(self._transform_width_changed)
+        self.artwork_height.valueChanged.connect(self._transform_height_changed)
+        self.artwork_scale_percent.valueChanged.connect(self._transform_scale_changed)
+        self.artwork_rotation.valueChanged.connect(self._transform_rotation_changed)
+        self.artwork_keep_aspect.toggled.connect(self._transform_aspect_changed)
+        self.svg_offset_x.valueChanged.connect(lambda _value: self._transform_position_changed())
+        self.svg_offset_y.valueChanged.connect(lambda _value: self._transform_position_changed())
+        placement_layout.setContentsMargins(8, 8, 8, 8)
+        placement_layout.setHorizontalSpacing(6)
+        placement_layout.setVerticalSpacing(4)
         placement_layout.addWidget(self.svg_auto, 0, 0)
         placement_layout.addWidget(self.svg_manual, 0, 1)
-        placement_layout.addWidget(QLabel("Rand"), 1, 0)
-        placement_layout.addWidget(self.svg_margin, 1, 1)
-        placement_layout.addWidget(QLabel("Breite"), 1, 2)
-        placement_layout.addWidget(self.svg_manual_width, 1, 3)
-        placement_layout.addWidget(QLabel("X"), 2, 0)
-        placement_layout.addWidget(self.svg_offset_x, 2, 1)
-        placement_layout.addWidget(QLabel("Y"), 2, 2)
-        placement_layout.addWidget(self.svg_offset_y, 2, 3)
-        layout.addWidget(placement)
+        placement_layout.addWidget(QLabel("Rand"), 0, 2)
+        placement_layout.addWidget(self.svg_margin, 0, 3)
+        placement_layout.addWidget(self.artwork_keep_aspect, 0, 4, 1, 2)
+        self.svg_size_label = QLabel("Motiv: keine SVG")
+        self.svg_size_label.setWordWrap(False)
+        self.svg_size_label.setMaximumHeight(22)
 
-        middle = QSplitter(Qt.Orientation.Horizontal)
+        compact_fields = (
+            ("X", self.svg_offset_x),
+            ("Y", self.svg_offset_y),
+            ("Breite", self.svg_manual_width),
+            ("Hoehe", self.artwork_height),
+            ("Skalierung", self.artwork_scale_percent),
+            ("Rotation", self.artwork_rotation),
+        )
+        for index, (label, widget) in enumerate(compact_fields):
+            row = 1 + index // 3
+            column = (index % 3) * 2
+            placement_layout.addWidget(QLabel(label), row, column)
+            placement_layout.addWidget(widget, row, column + 1)
+
+        rotate_left = self._button("Links drehen", lambda: self._rotate_artwork(-90.0))
+        rotate_right = self._button("Rechts drehen", lambda: self._rotate_artwork(90.0))
+        placement_layout.addWidget(rotate_left, 3, 0)
+        placement_layout.addWidget(rotate_right, 3, 1)
+        placement_layout.addWidget(self._button("Zentrieren", self._center_artwork), 3, 2)
+        placement_layout.addWidget(self._button("Links unten", self._place_artwork_lower_left), 3, 3)
+        placement_layout.addWidget(self._button("Einpassen", self._fit_svg_to_material), 3, 4)
+        placement_layout.addWidget(self._button("Originalgroesse", self._restore_artwork_original_size), 3, 5)
+        placement_layout.addWidget(self.svg_size_label, 4, 0, 1, 6)
+        placement_body.setVisible(False)
+        self.transform_button = self._button("Motiv transformieren", self._open_transform_dialog)
+        layout.addWidget(self.transform_button)
+
         self.preview = WorkAreaPreview()
         preview_group = QGroupBox("Vorschau")
         preview_layout = QVBoxLayout(preview_group)
+        self.preview_options = {
+            "artwork": QCheckBox("Motiv"),
+            "bounds": QCheckBox("Bounding Box"),
+            "work_area": QCheckBox("Arbeitsbereich"),
+            "head": QCheckBox("Kopfposition"),
+            "gcode": QCheckBox("GCode-Pfad"),
+            "overscan": QCheckBox("Overscan"),
+            "snap": QCheckBox("Snap"),
+        }
+        option_row = QHBoxLayout()
+        for key, checkbox in self.preview_options.items():
+            checkbox.setChecked(key != "gcode")
+            checkbox.toggled.connect(lambda _checked: self._draw_preview())
+            option_row.addWidget(checkbox)
+        option_row.addStretch(1)
+        preview_layout.addLayout(option_row)
+        self.import_summary_label = QLabel("Import: keine Datei geladen")
+        self.import_summary_label.setObjectName("importSummary")
+        self.import_summary_label.setWordWrap(False)
+        self.import_summary_label.setMaximumHeight(22)
+        preview_layout.addWidget(self.import_summary_label)
+        self.preview_position_label = QLabel("Motivposition: --")
+        self.preview_position_label.setObjectName("previewPosition")
+        self.preview_position_label.setMaximumHeight(22)
+        preview_layout.addWidget(self.preview_position_label)
+        self.preview.artwork_position_requested.connect(self._move_artwork_from_preview)
+        self.preview.artwork_selection_changed.connect(self._preview_selection_changed)
+        self.preview.artwork_item_selected.connect(self._select_artwork_item)
         preview_layout.addWidget(self.preview)
-        middle.addWidget(preview_group)
+        layout.addWidget(preview_group, 1)
+
+        self.expert_tabs = QTabWidget()
         self.gcode_group = QGroupBox("G-Code")
         gcode_layout = QVBoxLayout(self.gcode_group)
         self.gcode_text = QTextEdit()
@@ -400,52 +727,103 @@ class LaserControlWindow(QMainWindow):
         self.gcode_text.textChanged.connect(self._update_job_summary)
         self.gcode_text.textChanged.connect(self._update_assistant_panel)
         gcode_layout.addWidget(self.gcode_text)
-        middle.addWidget(self.gcode_group)
-        middle.setStretchFactor(0, 1)
-        middle.setStretchFactor(1, 0)
-        layout.addWidget(middle, 1)
 
-        log_group = QGroupBox("Log")
-        log_layout = QVBoxLayout(log_group)
-        self.log_text = QTextEdit()
-        self.log_text.setReadOnly(True)
-        self.log_text.setMaximumHeight(140)
-        self.log_text.setStyleSheet("font-family: Consolas, monospace; font-size: 10pt;")
-        log_layout.addWidget(self.log_text)
-        layout.addWidget(log_group)
+        self.console_log_panel = ConsoleLogPanel()
+        self.log_text = self.console_log_panel.log_text
+        self.expert_tabs.addTab(self.gcode_group, "G-Code")
+        self.expert_tabs.addTab(self.console_log_panel, "Log")
+        self.diagnostics_group = QGroupBox("Diagnose / Expertenansicht")
+        self.diagnostics_group.setCheckable(True)
+        self.diagnostics_group.setChecked(False)
+        diagnostics_layout = QVBoxLayout(self.diagnostics_group)
+        diagnostics_layout.addWidget(self.expert_tabs)
+        self.expert_tabs.setVisible(False)
+        self.diagnostics_group.toggled.connect(self.expert_tabs.setVisible)
+        right_layout.addWidget(self.diagnostics_group)
+        right_layout.addStretch(1)
 
     def _build_status_bar(self, layout: QVBoxLayout) -> None:
-        status = QFrame()
-        status_layout = QGridLayout(status)
-        status_layout.setContentsMargins(0, 4, 0, 0)
-        self.job_status = QLabel("Bereit")
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 100)
-        self.status = QLabel("Simulator bereit.")
-        status_layout.addWidget(self.job_status, 0, 0)
-        status_layout.addWidget(self.progress, 0, 1)
-        status_layout.addWidget(self.status, 1, 0, 1, 2)
-        layout.addWidget(status)
+        self.status_panel = StatusPanel()
+        self.job_status = self.status_panel.job_status
+        self.progress = self.status_panel.progress
+        self.status = self.status_panel.status
+        layout.addWidget(self.status_panel)
+        self._apply_theme(self.dark_mode_enabled)
 
     def _button(self, text: str, handler: Callable) -> QPushButton:
         button = QPushButton(text)
+        button.setToolTip(text)
         button.clicked.connect(handler)
-        button.setMinimumHeight(28)
+        button.setMinimumHeight(32)
+        button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         return button
 
-    def _spin(self, minimum: int, maximum: int, value: int, step: int = 1) -> QSpinBox:
+    def _machine_action_button(self, action_id: str, source: str) -> QPushButton:
+        definition = self.machine_action_registry.get(action_id)
+        button = QPushButton(definition.label)
+        button.setObjectName(f"machineAction_{action_id}")
+        button.setToolTip(definition.tooltip)
+        if action_id in {"toggle_alignment", "toggle_work_area_trace"}:
+            button.setCheckable(True)
+        if action_id == "toggle_alignment":
+            self.alignment_button = button
+        if action_id == "toggle_work_area_trace":
+            self.work_area_trace_button = button
+        button.clicked.connect(lambda _checked=False, item=action_id, origin=source: self._trigger_machine_action(item, origin))
+        if action_id == "emergency_stop":
+            button.setMinimumHeight(42)
+        elif action_id in {"start_job", "stop", "frame", "dry_run"}:
+            button.setMinimumHeight(36)
+        else:
+            button.setMinimumHeight(32)
+        button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.action_buttons.setdefault(action_id, []).append(button)
+        return button
+
+    def _configure_sidebar_combo(self, combo: QComboBox) -> None:
+        combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        combo.setMinimumWidth(0)
+        combo.view().setMinimumWidth(320)
+        if hasattr(self, "sidebar_combos"):
+            self.sidebar_combos.append(combo)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt override
+        super().resizeEvent(event)
+        self._sync_sidebar_popup_widths()
+
+    def closeEvent(self, event) -> None:  # noqa: N802 - Qt override
+        self._closing = True
+        try:
+            self.app_controller.shutdown_controller()
+            for thread in list(self._worker_threads):
+                thread.join(timeout=1.0)
+        finally:
+            super().closeEvent(event)
+
+    def _sync_sidebar_popup_widths(self) -> None:
+        if not hasattr(self, "sidebar_combos"):
+            return
+        width = max(320, self.left_sidebar.width() - 24)
+        for combo in self.sidebar_combos:
+            combo.view().setMinimumWidth(width)
+
+    def _spin(self, minimum: int, maximum: int, value: int, step: int = 1, suffix: str = "") -> QSpinBox:
         spin = QSpinBox()
         spin.setRange(minimum, maximum)
         spin.setSingleStep(step)
         spin.setValue(value)
+        if suffix:
+            spin.setSuffix(suffix)
         return spin
 
-    def _double_spin(self, minimum: float, maximum: float, value: float) -> QDoubleSpinBox:
+    def _double_spin(self, minimum: float, maximum: float, value: float, suffix: str = "") -> QDoubleSpinBox:
         spin = QDoubleSpinBox()
         spin.setRange(minimum, maximum)
         spin.setDecimals(1)
         spin.setSingleStep(1.0)
         spin.setValue(value)
+        if suffix:
+            spin.setSuffix(suffix)
         return spin
 
     def _fit_gcode_panel_to_text(self) -> None:
@@ -461,702 +839,114 @@ class LaserControlWindow(QMainWindow):
         self.gcode_group.setMaximumWidth(target_width)
 
     def _settings_changed(self) -> None:
-        self._refresh_gcode()
-        self._draw_preview()
-
-    def _profile_selected(self) -> None:
-        self._ensure_profile_modes(self.profile_name.currentText())
-        self._apply_mode_profile_to_controls()
-        self._settings_changed()
-
-    def _material_settings_changed(self) -> None:
-        profile = self._selected_profile()
-        self._upsert_profile(profile)
-        self._settings_changed()
-
-    def _switch_controller(self) -> None:
-        try:
-            self.controller.disconnect()
-        except Exception as exc:  # noqa: BLE001 - UI logs controller errors
-            self.log(str(exc))
-        self._set_connection_indicator(False)
-        if self.connection_mode.currentText() == "GRBL ueber USB":
-            self.controller = GrblSerialController(self._threadsafe_log, lambda: self.serial_port.currentText(), self._threadsafe_progress)
+        if hasattr(self, "app_controller") and hasattr(self, "work_width") and hasattr(self, "work_height"):
+            self.app_controller.set_current_workspace(self.work_width.value(), self.work_height.value())
+        if self.original_imported_paths:
+            self._apply_svg_placement()
+        elif self.original_raster_source is not None:
+            fitted_source = self._fit_raster_source(self.original_raster_source)
+            self.raster_sources = [fitted_source]
+            self.artwork_source = fitted_source
+            self._set_svg_size_label(fitted_source.width_mm, fitted_source.height_mm, source_label=f"Raster: {fitted_source.file_name}")
+            self._refresh_gcode()
+            self._draw_preview()
         else:
-            self.controller = SimulatedLaserController(self._threadsafe_log, self._threadsafe_progress)
-        self.active_connection_mode = self.connection_mode.currentText()
-        self.log(f"Modus gewechselt: {self.active_connection_mode}")
+            self._refresh_gcode()
+            self._draw_preview()
 
-    def _current_controller(self):
-        if self.active_connection_mode != self.connection_mode.currentText():
-            self._switch_controller()
-        return self.controller
-
-    def _refresh_ports(self) -> None:
-        ports = list_serial_ports()
-        self.serial_port.clear()
-        self.serial_port.addItems(ports)
-        if ports:
-            self.serial_port.setCurrentIndex(0)
-        self.log(f"{len(ports)} COM-Port(s) gefunden." if ports else "Keine COM-Ports gefunden.")
-
-    def _auto_detect_laser(self) -> None:
-        self.log("Suche Laser an COM-Ports...")
-        self._set_progress("Laser suchen", 0, 1)
-
-        def detect() -> None:
-            candidate = find_laser_port()
-            if candidate is None:
-                self.signals.error.emit("Kein passender Laser-Port gefunden.")
-                return
-            self.signals.log.emit(f"Laser-Port gefunden: {candidate.label} ({candidate.reason})")
-            self.signals.port_detected.emit(candidate.label)
-            self.signals.progress.emit("Bereit", 1, 1)
-
-        self._run_worker(detect)
-
-    def _apply_detected_port(self, port_label: str) -> None:
-        self.connection_mode.setCurrentText("GRBL ueber USB")
-        self._refresh_ports()
-        index = self.serial_port.findText(port_label)
-        if index < 0:
-            self.serial_port.addItem(port_label)
-            index = self.serial_port.findText(port_label)
-        self.serial_port.setCurrentIndex(index)
-        self.log(f"COM-Port automatisch ausgewaehlt: {port_label}")
-
-    def _query_status(self) -> None:
-        controller = self._current_controller()
-        if hasattr(controller, "query_status"):
-            self._run_worker(lambda: controller.query_status())
-        else:
-            self.log("Statusabfrage im Simulator nicht verfuegbar.")
-
-    def _query_settings(self) -> None:
-        controller = self._current_controller()
-        if hasattr(controller, "query_settings"):
-            self._run_worker(lambda: controller.query_settings())
-        else:
-            self.log("GRBL Settings nur im USB-Modus verfuegbar.")
-
-    def _frame_job(self) -> None:
-        controller = self._current_controller()
-        width = self.work_width.value()
-        height = self.work_height.value()
-
-        def frame() -> None:
-            try:
-                controller.frame(width, height)
-            except TypeError:
-                controller.frame()
-
-        self._run_worker(frame)
-
-    def _start_job(self) -> None:
-        controller = self._current_controller()
-        width = self.work_width.value()
-        height = self.work_height.value()
-        profile = self._selected_profile()
-        gcode = self.gcode_text.toPlainText().strip()
-        try:
-            prepared = self.job_service.prepare_job(gcode, width, height, profile, self.operation_mode.currentText())
-        except ValueError as exc:
-            self.log(str(exc))
-            QMessageBox.critical(self, "G-Code ungueltig", str(exc))
-            return
-
-        controller_name = controller.__class__.__name__
-        mode_label = self._operation_mode_label()
-        mode_laser = "M3 konstant" if self.operation_mode.currentText() == CUT_MODE else "M4 dynamisch"
-        self._show_job_analysis(prepared)
-        self.last_prepared_job = prepared
-        self._update_assistant_panel(prepared)
-
-        if self.connection_mode.currentText() != "GRBL ueber USB":
-            confirmed = QMessageBox.question(
-                self,
-                "Simulator-Modus",
-                "Die App ist im Simulator-Modus.\n\n"
-                "Der Job wird nicht an den Laser gesendet.\n"
-                f"Auswahl: {mode_label}\n"
-                f"Laser-Modus: {mode_laser}\n"
-                f"Leistung: {profile.power_percent}%\n"
-                f"Geschwindigkeit: {profile.speed_mm_min} mm/min\n"
-                f"Durchgaenge: {profile.passes}\n"
-                f"G-Code-Zeilen: {len(prepared.commands)}\n"
-                f"Geschaetzte Laufzeit: {prepared.analysis.estimated_runtime_label}\n"
-                "Soll die Simulation gestartet werden?",
+    def _draw_preview(self) -> None:
+        if hasattr(self, "preview"):
+            self.preview.set_preview_model(
+                self._build_preview_model(),
+                self.material_shape.currentText() if hasattr(self, "material_shape") else MATERIAL_SHAPE_RECTANGLE,
+                self.svg_margin.value() if hasattr(self, "svg_margin") else AUTO_FIT_MARGIN_MM,
+                self.job_origin.currentText() if hasattr(self, "job_origin") else JOB_ORIGIN_LOWER_LEFT,
             )
-            if confirmed != QMessageBox.StandardButton.Yes:
-                self.log("Simulation abgebrochen.")
-                return
-        else:
-            if not self._hardware_preflight_ok(controller):
-                return
-            if prepared.warnings and not self._confirm_warnings(prepared.warnings):
-                self.log("Jobstart wegen Preflight-Warnung abgebrochen.")
-                return
-            confirmed = QMessageBox.question(
-                self,
-                "Laserjob starten",
-                "Laserjob wirklich starten?\n\n"
-                "Modus: GRBL ueber USB\n"
-                f"Operation: {mode_label}\n"
-                f"Laser-Modus: {mode_laser}\n"
-                f"Controller: {controller_name}\n"
-                f"Port: {self.serial_port.currentText()}\n"
-                f"Arbeitsbereich: {width:.0f} x {height:.0f} mm\n"
-                f"Material: {profile.name}\n"
-                f"Leistung: {profile.power_percent}%\n"
-                f"Geschwindigkeit: {profile.speed_mm_min} mm/min\n"
-                f"G-Code-Zeilen: {len(prepared.commands)}\n"
-                f"Geschaetzte Laufzeit: {prepared.analysis.estimated_runtime_label}\n\n"
-                "Schutzbrille tragen und Arbeitsbereich pruefen.",
+            selected_item = self._selected_artwork_item()
+            self.preview.set_artwork_interaction(
+                selected_item.transform.bounds if selected_item is not None else (self.artwork_transform.bounds if self.artwork_transform is not None else None),
+                bool(
+                    self.preview_options.get("snap") is None
+                    or self.preview_options["snap"].isChecked()
+                ),
             )
-            if confirmed != QMessageBox.StandardButton.Yes:
-                self.log("Jobstart abgebrochen.")
-                return
+        self._update_import_summary()
 
-        self.log(f"Start-Controller: {controller_name} ({mode_label})")
-
-        def start() -> None:
-            try:
-                controller.start_job(gcode, width, height)
-            except TypeError:
-                controller.start_job(gcode)
-
-        self._run_worker(start)
-
-    def _dry_run_job(self) -> None:
-        controller = self._current_controller()
-        width = self.work_width.value()
-        height = self.work_height.value()
-        gcode = self.gcode_text.toPlainText().strip()
-        try:
-            dry_run_gcode = "\n".join(self.job_service.prepare_dry_run(gcode, width, height).commands)
-        except ValueError as exc:
-            self.log(str(exc))
-            QMessageBox.critical(self, "Dry Run nicht moeglich", str(exc))
-            return
-
-        if self.connection_mode.currentText() == "GRBL ueber USB" and not self._hardware_preflight_ok(controller):
-            return
-
-        self.log(f"Dry Run Start-Controller: {controller.__class__.__name__} ({self._operation_mode_label()})")
-
-        def start_dry_run() -> None:
-            try:
-                controller.start_job(dry_run_gcode, width, height)
-            except TypeError:
-                controller.start_job(dry_run_gcode)
-
-        self._run_worker(start_dry_run)
-
-    def _hardware_preflight_ok(self, controller) -> bool:
-        warnings = self.job_service.hardware_preflight_warnings(controller, self.serial_port.currentText())
-        if warnings:
-            message = "\n".join(f"- {item}" for item in warnings)
-            self.log(message)
-            QMessageBox.critical(self, "Preflight fehlgeschlagen", message)
-            return False
-        return True
-
-    def _confirm_warnings(self, warnings: list[str]) -> bool:
-        warning_text = "\n".join(f"- {item}" for item in warnings)
-        result = QMessageBox.question(
-            self,
-            "Preflight-Warnungen",
-            "Bitte pruefe diese Punkte vor dem Start:\n\n"
-            f"{warning_text}\n\n"
-            "Nur fortsetzen, wenn Material, Fokus, Air Assist, Absaugung und Schutzbrille vorbereitet sind.",
-        )
-        return result == QMessageBox.StandardButton.Yes
-
-    def _show_job_analysis(self, prepared: JobPreparation) -> None:
-        analysis = prepared.analysis
-        bounds = "keine Pfadgrenzen"
-        if analysis.has_bounds:
-            bounds = (
-                f"X {analysis.min_x:.1f}..{analysis.max_x:.1f} mm, "
-                f"Y {analysis.min_y:.1f}..{analysis.max_y:.1f} mm"
-            )
-        self.log(
-            "Jobanalyse: "
-            f"{len(prepared.commands)} Zeilen, "
-            f"{analysis.movement_count} Bewegungen, "
-            f"{analysis.laser_command_count} Laserbefehle, "
-            f"{bounds}, "
-            f"ca. {analysis.estimated_runtime_label}."
-        )
-
-    def _update_job_summary(self) -> None:
-        if not hasattr(self, "job_summary"):
-            return
-        try:
-            prepared = self.job_service.prepare_job(
-                self.gcode_text.toPlainText(),
-                self.work_width.value(),
-                self.work_height.value(),
-                self._selected_profile(),
-                self.operation_mode.currentText(),
-            )
-        except ValueError as exc:
-            self.job_summary.setText(f"G-Code: {exc}")
-            return
-        analysis = prepared.analysis
-        warning_count = len(prepared.warnings)
-        warning_text = f" | Warnungen: {warning_count}" if warning_count else ""
-        bounds = ""
-        if analysis.has_bounds:
-            bounds = f" | Pfad: {analysis.width_mm:.1f} x {analysis.height_mm:.1f} mm"
-        self.job_summary.setText(
-            f"G-Code: {len(prepared.commands)} Zeilen | Bewegungen: {analysis.movement_count} "
-            f"| Laufzeit ca. {analysis.estimated_runtime_label}{bounds}{warning_text}"
-        )
-        self.last_prepared_job = prepared
-
-    def _update_assistant_panel(self, prepared: JobPreparation | None = None) -> None:
-        if not hasattr(self, "assistant_summary"):
-            return
-        if prepared is None:
+    def _build_preview_model(self) -> JobPreviewModel:
+        estimated_runtime = None
+        warnings: list[str] = []
+        if hasattr(self, "gcode_text"):
             try:
                 prepared = self.job_service.prepare_job(
                     self.gcode_text.toPlainText(),
                     self.work_width.value(),
                     self.work_height.value(),
-                    self._selected_profile(),
+                    self._effective_job_profile(),
                     self.operation_mode.currentText(),
                 )
+                estimated_runtime = prepared.analysis.estimated_runtime_seconds
+                warnings.extend(prepared.warnings)
+                gcode_segments = prepared.analysis.segments
             except ValueError as exc:
-                self.assistant_summary.setPlainText(f"Assistenz: {exc}")
-                return
-        profile = self._selected_profile()
-        advice = self.assistant_service.advise(
-            profile.name,
-            self.operation_mode.currentText(),
-            profile,
-            prepared.analysis,
-            prepared.warnings,
-            self.job_history,
-        )
-        lines = [f"Risiko: {advice.risk_label} ({advice.risk_score}/100)"]
-        lines.extend(f"- {item}" for item in advice.recommendations)
-        if advice.matching_successes:
-            lines.append(f"Gespeicherte gute Treffer: {len(advice.matching_successes)}")
-        self.assistant_summary.setPlainText("\n".join(lines))
-
-    def _generate_test_matrix(self) -> None:
-        profile = self._selected_profile()
-        gcode = self.assistant_service.build_test_matrix_gcode(
-            profile.name,
-            self.operation_mode.currentText(),
-            profile,
-        )
-        self.gcode_text.setPlainText(gcode)
-        self.imported_paths = []
-        self.original_imported_paths = []
-        self._draw_preview()
-        self.log("Testmatrix erzeugt. Bitte zuerst Dry Run und dann auf Restmaterial testen.")
-
-    def _record_job_result(self, result: str) -> None:
-        try:
-            prepared = self.job_service.prepare_job(
-                self.gcode_text.toPlainText(),
+                warnings.append(str(exc))
+                gcode_segments = []
+        else:
+            gcode_segments = []
+        if self.autofit_result is not None:
+            warnings.append(self.autofit_result.summary)
+        # A generated job (test matrix) is shown as its G-code, not as the imported artwork.
+        if self.laser_project.items and not getattr(self, "_generated_job_name", None):
+            return build_multi_item_preview_model(
+                self._visible_preview_items(),
+                self._current_layers(),
                 self.work_width.value(),
                 self.work_height.value(),
-                self._selected_profile(),
-                self.operation_mode.currentText(),
+                estimated_runtime,
+                warnings,
+                gcode_segments,
+                self._preview_head_position(),
+                self._preview_options(),
+                self._fill_toolpaths_by_item,
             )
-        except ValueError as exc:
-            QMessageBox.warning(self, "Job-Historie", str(exc))
-            return
-        note, ok = QInputDialog.getText(self, "Job-Historie", "Notiz zum Ergebnis:")
-        if not ok:
-            return
-        profile = self._selected_profile()
-        entry = JobHistoryEntry(
-            timestamp=now_timestamp(),
-            material_name=profile.name,
-            operation_mode=self.operation_mode.currentText(),
-            power_percent=profile.power_percent,
-            speed_mm_min=profile.speed_mm_min,
-            passes=profile.passes,
-            work_width_mm=self.work_width.value(),
-            work_height_mm=self.work_height.value(),
-            command_count=len(prepared.commands),
-            movement_count=prepared.analysis.movement_count,
-            estimated_runtime_seconds=prepared.analysis.estimated_runtime_seconds,
-            warning_count=len(prepared.warnings),
-            result=result,
-            notes=note,
-        )
-        self.job_history = append_job_history(entry)
-        self._update_assistant_panel(prepared)
-        self.log(f"Job-Ergebnis gespeichert: {result}")
-
-    def _refresh_gcode(self) -> None:
-        if not hasattr(self, "gcode_text"):
-            return
-        profile = self._selected_profile()
-        operation_mode = self.operation_mode.currentText()
-        if self.imported_paths:
-            code = build_polyline_gcode(self.imported_paths, profile, operation_mode)
-        else:
-            code = build_rectangle_frame_gcode(self.work_width.value(), self.work_height.value(), profile, operation_mode)
-        if self.gcode_text.toPlainText() != code:
-            self.gcode_text.setPlainText(code)
-        self._update_job_summary()
-
-    def _operation_mode_label(self) -> str:
-        return "Cutten (M3 konstant)" if self.operation_mode.currentText() == CUT_MODE else "Gravieren (M4 dynamisch)"
-
-    def _on_operation_mode_changed(self) -> None:
-        self._apply_mode_profile_to_controls()
-        self._settings_changed()
-
-    def _ensure_profile_modes(self, profile_name: str) -> None:
-        self.profile_service.ensure_profile_modes(profile_name)
-
-    def _apply_mode_profile_to_controls(self) -> None:
-        selected_name = self.profile_name.currentText()
-        if not selected_name:
-            return
-        self._ensure_profile_modes(selected_name)
-        mode_profile = self.profile_service.profile_for(selected_name, self.operation_mode.currentText())
-        self.power_percent.blockSignals(True)
-        self.speed_mm_min.blockSignals(True)
-        self.passes.blockSignals(True)
-        self.power_percent.setValue(mode_profile.power_percent)
-        self.speed_mm_min.setValue(mode_profile.speed_mm_min)
-        self.passes.setValue(mode_profile.passes)
-        self.power_percent.blockSignals(False)
-        self.speed_mm_min.blockSignals(False)
-        self.passes.blockSignals(False)
-
-    def _import_svg(self) -> None:
-        path, _filter = QFileDialog.getOpenFileName(self, "SVG importieren", "", "SVG Dateien (*.svg);;Alle Dateien (*.*)")
-        if not path:
-            return
-        try:
-            result = import_svg(path)
-        except Exception as exc:  # noqa: BLE001 - show file import errors to user
-            QMessageBox.critical(self, "SVG Import", str(exc))
-            return
-        self.original_imported_paths = result.paths
-        self.imported_file = path
-        self.svg_manual_width.setValue(min(result.width_mm, self.work_width.value()))
-        self._apply_svg_placement()
-        self.log(f"SVG importiert: {path}")
-
-    def _save_project(self) -> None:
-        path = self.current_project_path
-        if path is None:
-            path, _filter = QFileDialog.getSaveFileName(self, "Projekt speichern", "", "Laser Projekt (*.laser.json)")
-        if not path:
-            return
-        if not path.endswith(".laser.json"):
-            path += ".laser.json"
-        data = project_to_dict(
+        preview_paths = self._effective_legacy_source_paths() if self.original_imported_paths and self.artwork_transform is not None else self.imported_paths
+        return build_preview_model(
+            preview_paths,
+            self._current_layers(),
             self.work_width.value(),
             self.work_height.value(),
-            self._selected_profile(),
-            self.gcode_text.toPlainText(),
-            self.imported_paths,
-            self.imported_file,
-            self.material_measurement,
-            self._svg_placement_data(),
-            self.operation_mode.currentText(),
-        )
-        save_project(path, data)
-        self.current_project_path = path
-        self.log(f"Projekt gespeichert: {path}")
-
-    def _load_project(self) -> None:
-        path, _filter = QFileDialog.getOpenFileName(self, "Projekt laden", "", "Laser Projekt (*.laser.json);;Alle Dateien (*.*)")
-        if not path:
-            return
-        try:
-            data = load_project(path)
-        except Exception as exc:  # noqa: BLE001 - show project load errors to user
-            QMessageBox.critical(self, "Projekt laden", str(exc))
-            return
-        self.work_width.setValue(float(data["work_area"]["width_mm"]))
-        self.work_height.setValue(float(data["work_area"]["height_mm"]))
-        profile_data = data["material_profile"]
-        profile = MaterialProfile(
-            profile_data["name"],
-            int(profile_data["power_percent"]),
-            int(profile_data["speed_mm_min"]),
-            int(profile_data["passes"]),
-        )
-        self._upsert_profile(profile)
-        self.profile_name.setCurrentText(profile.name)
-        self.power_percent.setValue(profile.power_percent)
-        self.speed_mm_min.setValue(profile.speed_mm_min)
-        self.passes.setValue(profile.passes)
-        self.current_project_path = path
-        self.imported_paths = data.get("imported_paths", [])
-        self.original_imported_paths = self.imported_paths
-        self.imported_file = data.get("imported_file")
-        self.material_measurement = data.get("material_measurement")
-        placement = data.get("svg_placement") or {}
-        if data.get("operation_mode"):
-            self.operation_mode.setCurrentText(data["operation_mode"])
-        self.svg_auto.setChecked(placement.get("mode", "Automatisch") == "Automatisch")
-        self.svg_manual_width.setValue(float(placement.get("manual_width", self.svg_manual_width.value())))
-        self.svg_offset_x.setValue(float(placement.get("offset_x", 0)))
-        self.svg_offset_y.setValue(float(placement.get("offset_y", 0)))
-        self.svg_margin.setValue(float(placement.get("margin", 5)))
-        self.gcode_text.setPlainText(data.get("gcode", ""))
-        self._update_material_measurement_label()
-        self._draw_preview()
-        self.log(f"Projekt geladen: {path}")
-
-    def _draw_preview(self) -> None:
-        if hasattr(self, "preview"):
-            self.preview.set_preview(self.work_width.value(), self.work_height.value(), self.imported_paths)
-
-    def _selected_profile(self) -> MaterialProfile:
-        return MaterialProfile(
-            self.profile_name.currentText() or DEFAULT_PROFILES[0].name,
-            self.power_percent.value() if hasattr(self, "power_percent") else DEFAULT_PROFILES[0].power_percent,
-            self.speed_mm_min.value() if hasattr(self, "speed_mm_min") else DEFAULT_PROFILES[0].speed_mm_min,
-            self.passes.value() if hasattr(self, "passes") else DEFAULT_PROFILES[0].passes,
+            estimated_runtime,
+            warnings,
+            self.raster_sources,
+            self.artwork_transform if self.original_imported_paths else None,
+            gcode_segments,
+            self._preview_head_position(),
+            self._preview_options(),
+            self.fill_toolpaths,
         )
 
-    def _upsert_profile(self, profile: MaterialProfile) -> None:
-        self.profile_service.upsert_mode_profile(profile, self.operation_mode.currentText())
-        self.profile_name.blockSignals(True)
-        current = self.profile_name.currentText()
-        self.profile_name.clear()
-        self.profile_name.addItems(self.profile_service.names())
-        self.profile_name.setCurrentText(current or profile.name)
-        self.profile_name.blockSignals(False)
+    def _preview_options(self) -> PreviewOptions:
+        options = getattr(self, "preview_options", {})
+        return PreviewOptions(
+            show_artwork=bool(options.get("artwork") is None or options["artwork"].isChecked()),
+            show_bounds=bool(options.get("bounds") is None or options["bounds"].isChecked()),
+            show_work_area=bool(options.get("work_area") is None or options["work_area"].isChecked()),
+            show_head_position=bool(options.get("head") is None or options["head"].isChecked()),
+            show_gcode_path=bool(options.get("gcode") is not None and options["gcode"].isChecked()),
+            show_overscan=bool(options.get("overscan") is None or options["overscan"].isChecked()),
+        )
 
-    def _capture_material_point(self, point_index: int) -> None:
-        controller = self._current_controller()
-        try:
-            x, y = controller.current_position()
-        except Exception as exc:  # noqa: BLE001 - user-facing hardware state
-            self.log(str(exc))
-            QMessageBox.critical(self, "Material einmessen", str(exc))
-            return
-        if point_index == 1:
-            self.material_point_a = (x, y)
-        else:
-            self.material_point_b = (x, y)
-        self._update_material_measurement_label()
-
-    def _apply_material_measurement(self) -> None:
-        if not self.material_point_a or not self.material_point_b:
-            QMessageBox.warning(self, "Material einmessen", "Bitte zuerst beide Ecken setzen.")
-            return
-        ax, ay = self.material_point_a
-        bx, by = self.material_point_b
-        width = abs(bx - ax)
-        height = abs(by - ay)
-        self.work_width.setValue(width)
-        self.work_height.setValue(height)
-        self.material_db_width.setValue(width)
-        self.material_db_height.setValue(height)
-        self.material_measurement = {"point_a": self.material_point_a, "point_b": self.material_point_b}
-        self._update_material_measurement_label()
-        self._settings_changed()
-
-    def _update_material_measurement_label(self) -> None:
-        if not self.material_point_a and not self.material_point_b:
-            self.material_measurement_label.setText("Nicht eingemessen")
-            return
-        self.material_measurement_label.setText(f"Ecke 1: {self.material_point_a or '-'}\nEcke 2: {self.material_point_b or '-'}")
-
-    def _save_measured_material(self) -> None:
-        name = self.material_db_name.currentText().strip()
-        if not name:
-            QMessageBox.warning(self, "Material speichern", "Bitte einen Materialnamen eingeben.")
-            return
-        record = {
-            "name": name,
-            "width_mm": self.material_db_width.value() or self.work_width.value(),
-            "height_mm": self.material_db_height.value() or self.work_height.value(),
-            "point_a": self.material_point_a,
-            "point_b": self.material_point_b,
-        }
-        self.material_db_records = upsert_material(record)
-        self._refresh_material_db_combo()
-        self.log(f"Material gespeichert: {name}")
-
-    def _select_material_record(self) -> None:
-        record = find_material(self.material_db_selection.currentText())
-        if record:
-            self.material_db_name.setCurrentText(record.get("name", ""))
-            self.material_db_width.setValue(float(record.get("width_mm", 0)))
-            self.material_db_height.setValue(float(record.get("height_mm", 0)))
-
-    def _load_measured_material(self) -> None:
-        record = find_material(self.material_db_selection.currentText())
-        if not record:
-            return
-        self.work_width.setValue(float(record.get("width_mm", self.work_width.value())))
-        self.work_height.setValue(float(record.get("height_mm", self.work_height.value())))
-        self.material_point_a = tuple(record["point_a"]) if record.get("point_a") else None
-        self.material_point_b = tuple(record["point_b"]) if record.get("point_b") else None
-        self.material_measurement = {"point_a": self.material_point_a, "point_b": self.material_point_b}
-        self._update_material_measurement_label()
-        self._settings_changed()
-        self.log(f"Material geladen: {record.get('name', '')}")
-
-    def _refresh_material_db_combo(self) -> None:
-        names = [item.get("name", "") for item in self.material_db_records]
-        self.material_db_selection.blockSignals(True)
-        self.material_db_selection.clear()
-        self.material_db_selection.addItems(names)
-        self.material_db_selection.blockSignals(False)
-        self.material_db_name.clear()
-        self.material_db_name.addItems(names)
-
-    def _delete_measured_material(self) -> None:
-        name = self.material_db_selection.currentText()
-        if not name:
-            return
-        self.material_db_records = delete_material(name)
-        self._refresh_material_db_combo()
-        self.log(f"Material geloescht: {name}")
-
-    def _apply_svg_placement(self) -> None:
-        if not self.original_imported_paths:
-            return
-        try:
-            if self.svg_auto.isChecked():
-                self.imported_paths, fitted_width, _fitted_height = fit_paths_to_area(
-                    self.original_imported_paths,
-                    self.work_width.value(),
-                    self.work_height.value(),
-                    self.svg_margin.value(),
-                )
-                self.svg_manual_width.blockSignals(True)
-                self.svg_manual_width.setValue(fitted_width)
-                self.svg_manual_width.blockSignals(False)
-            else:
-                self.imported_paths, _fitted_width, _fitted_height = scale_paths_to_width(
-                    self.original_imported_paths,
-                    self.svg_manual_width.value(),
-                    self.svg_offset_x.value(),
-                    self.svg_offset_y.value(),
-                )
-        except ValueError as exc:
-            self.log(str(exc))
-            return
-        self._refresh_gcode()
-        self._draw_preview()
-
-    def _svg_placement_data(self) -> dict:
-        return {
-            "mode": "Automatisch" if self.svg_auto.isChecked() else "Manuell",
-            "margin": self.svg_margin.value(),
-            "manual_width": self.svg_manual_width.value(),
-            "offset_x": self.svg_offset_x.value(),
-            "offset_y": self.svg_offset_y.value(),
-        }
-
-    def _run_controller_action(self, action, allow_while_busy: bool = False) -> None:
-        controller = self._current_controller()
-        self._run_worker(lambda: action(controller), allow_while_busy=allow_while_busy)
-
-    def _run_worker(self, action, allow_while_busy: bool = False) -> None:
-        if self.worker_busy and not allow_while_busy:
-            self.log("Bitte warten, bis die aktuelle Aktion abgeschlossen ist.")
-            return
-        self.worker_busy = True
-        self._set_progress("Laeuft", 0, 1)
-
-        def target() -> None:
-            try:
-                action()
-            except Exception as exc:  # noqa: BLE001 - report worker failures to UI
-                self.signals.error.emit(str(exc))
-            finally:
-                self.signals.finished.emit()
-
-        thread = threading.Thread(target=target, daemon=True)
-        thread.start()
-
-    def _threadsafe_log(self, message: str) -> None:
-        self.signals.log.emit(message)
-
-    def _threadsafe_progress(self, label: str, current: int, total: int) -> None:
-        self.signals.progress.emit(label, current, total)
-
-    def _show_worker_error(self, message: str) -> None:
-        self.log(message)
-        QMessageBox.critical(self, "Fehler", message)
-
-    def _worker_finished(self) -> None:
-        self.worker_busy = False
-        self._sync_connection_indicator()
-
-    def _sync_connection_indicator(self) -> None:
-        state = getattr(self.controller, "state", None)
-        self._set_connection_indicator(bool(state and state.connected))
-
-    def _set_connection_indicator(self, connected: bool) -> None:
-        self.connection_label.setText("Verbunden" if connected else "Nicht verbunden")
-        color = "#188038" if connected else "#d93025"
-        self.connection_label.setStyleSheet(f"color: {color}; font-weight: 600;")
-
-    def _set_progress(self, label: str, current: int, total: int) -> None:
-        total = max(1, total)
-        percent = int(current / total * 100)
-        self.job_status.setText(label)
-        self.progress.setValue(percent)
+    def _preview_head_position(self) -> PreviewHeadPosition | None:
+        state = getattr(self, "app_controller", None).machine_state if hasattr(self, "app_controller") else None
+        if state is None or not state.position_source or state.x_mm is None or state.y_mm is None:
+            return None
+        if not state.position_source.startswith("WPos"):
+            return None
+        return PreviewHeadPosition(state.x_mm, state.y_mm, state.position_source)
 
     def log(self, message: str) -> None:
-        self.status.setText(message)
-        self.log_text.append(message)
-
-    def _export_profiles(self) -> None:
-        path, _filter = QFileDialog.getSaveFileName(self, "Profile exportieren", "", "JSON (*.json)")
-        if not path:
-            return
-        if not path.endswith(".json"):
-            path += ".json"
-        self.profile_service.export_profiles(path)
-        self.log(f"Profile exportiert: {path}")
-
-    def _import_profiles(self) -> None:
-        path, _filter = QFileDialog.getOpenFileName(self, "Profile importieren", "", "JSON (*.json);;Alle Dateien (*.*)")
-        if not path:
-            return
-        try:
-            self.profile_service.import_profiles(path)
-        except Exception as exc:  # noqa: BLE001 - user-facing import error
-            QMessageBox.critical(self, "Profile importieren", str(exc))
-            return
-        self.profile_name.clear()
-        self.profile_name.addItems(self.profile_service.names())
-        self._apply_mode_profile_to_controls()
-        self._settings_changed()
-        self.log(f"Profile importiert: {path}")
-
-    def _export_history(self) -> None:
-        path, _filter = QFileDialog.getSaveFileName(self, "Historie exportieren", "", "JSON (*.json)")
-        if not path:
-            return
-        if not path.endswith(".json"):
-            path += ".json"
-        export_job_history(path)
-        self.log(f"Historie exportiert: {path}")
-
-    def _import_history(self) -> None:
-        path, _filter = QFileDialog.getOpenFileName(self, "Historie importieren", "", "JSON (*.json);;Alle Dateien (*.*)")
-        if not path:
-            return
-        try:
-            self.job_history = import_job_history(path)
-        except Exception as exc:  # noqa: BLE001 - user-facing import error
-            QMessageBox.critical(self, "Historie importieren", str(exc))
-            return
-        self._update_assistant_panel()
-        self.log(f"Historie importiert: {path}")
+        self.status_panel.set_message(message)
+        self.console_log_panel.append(message)
+        self.diagnostic_log.app(message)
 
 
 def run_app() -> int:

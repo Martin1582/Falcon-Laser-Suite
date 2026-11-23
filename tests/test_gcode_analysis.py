@@ -29,3 +29,16 @@ def test_analyze_gcode_warns_on_relative_positioning() -> None:
 
     assert analysis.uses_relative_positioning
     assert any("Relative Positionierung" in warning for warning in analysis.warnings)
+
+
+def test_analyze_gcode_extracts_motion_segments_for_preview_overlay() -> None:
+    analysis = analyze_gcode("G90\nG0 X1 Y2\nG1 X5 Y6 S400 F1200\nM5", 20, 20)
+
+    assert len(analysis.segments) == 2
+    assert analysis.segments[0].rapid
+    assert analysis.segments[0].end_x == 1.0
+    assert analysis.segments[0].end_y == 2.0
+    assert not analysis.segments[1].rapid
+    assert analysis.segments[1].start_x == 1.0
+    assert analysis.segments[1].start_y == 2.0
+    assert analysis.segments[1].laser_power == 400.0

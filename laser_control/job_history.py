@@ -1,8 +1,9 @@
-import json
 import os
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
+
+from laser_control.json_store import read_json_object, write_json_object
 
 
 @dataclass
@@ -37,17 +38,20 @@ def load_job_history() -> list[JobHistoryEntry]:
     path = job_history_path()
     if not path.exists():
         return []
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return [JobHistoryEntry(**item) for item in data.get("jobs", [])]
+    try:
+        data = read_json_object(path, {"jobs": []})
+    except ValueError:
+        return []
+    jobs = data.get("jobs", [])
+    if not isinstance(jobs, list):
+        return []
+    return [JobHistoryEntry(**item) for item in jobs if isinstance(item, dict)]
 
 
 def save_job_history(entries: list[JobHistoryEntry]) -> None:
     path = job_history_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps({"jobs": [asdict(entry) for entry in entries]}, indent=2),
-        encoding="utf-8",
-    )
+    write_json_object(path, {"jobs": [asdict(entry) for entry in entries]})
 
 
 def append_job_history(entry: JobHistoryEntry) -> list[JobHistoryEntry]:
@@ -59,15 +63,12 @@ def append_job_history(entry: JobHistoryEntry) -> list[JobHistoryEntry]:
 
 def export_job_history(path: str) -> None:
     entries = load_job_history()
-    Path(path).write_text(
-        json.dumps({"version": 1, "jobs": [asdict(entry) for entry in entries]}, indent=2),
-        encoding="utf-8",
-    )
+    write_json_object(path, {"version": 1, "jobs": [asdict(entry) for entry in entries]})
 
 
 def import_job_history(path: str) -> list[JobHistoryEntry]:
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
-    entries = [JobHistoryEntry(**item) for item in data.get("jobs", [])]
+    data = read_json_object(Path(path), {"jobs": []})
+    entries = [JobHistoryEntry(**item) for item in data.get("jobs", []) if isinstance(item, dict)]
     save_job_history(entries)
     return entries
 
