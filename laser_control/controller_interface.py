@@ -10,6 +10,7 @@ class LaserController(Protocol):
     """Common machine API used by the UI and workflow layer."""
 
     state: LaserState
+    homing_required: bool
 
     def connect(self) -> None:
         ...
@@ -42,6 +43,10 @@ class LaserController(Protocol):
         ...
 
     def emergency_stop(self) -> None:
+        ...
+
+    def unlock(self) -> None:
+        """Clear an alarm lock without homing (GRBL `$X`). Position stays unreferenced."""
         ...
 
     def current_position(self) -> tuple[float, float]:

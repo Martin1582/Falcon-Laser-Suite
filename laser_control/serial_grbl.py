@@ -147,6 +147,8 @@ class GrblSerialController:
         diagnostic_log: DiagnosticLog | None = None,
     ) -> None:
         self.state = LaserState()
+        # Set from the active machine profile; machines without homing switches may run unhomed.
+        self.homing_required = True
         self._log = log
         self._progress = progress
         self._port_getter = port_getter
@@ -239,10 +241,23 @@ class GrblSerialController:
         self._require_connected()
         self._emit_progress("Referenzfahrt", 0, 1)
         self.send_command("$H", wait_seconds=10.0)
+        # A successful homing cycle clears the GRBL alarm lock.
+        self.state.alarm = False
+        self.state.status = "Idle"
         self.state.homed = True
         self.state.x_mm = 0.0
         self.state.y_mm = 0.0
         self._log("Referenzfahrt abgeschlossen.")
+        self._emit_progress("Bereit", 1, 1)
+
+    def unlock(self) -> None:
+        self._require_connected()
+        self._log("Alarm entsperren: sende '$X'. Position ist danach nicht referenziert.")
+        self.send_command("$X")
+        self.state.alarm = False
+        self.state.status = "Idle"
+        self.state.homed = False
+        self._log("Alarm entsperrt. Vor Jobs bitte Referenzfahrt ausfuehren oder Position pruefen.")
         self._emit_progress("Bereit", 1, 1)
 
     def jog(self, dx_mm: float, dy_mm: float) -> None:
@@ -870,8 +885,11 @@ class GrblSerialController:
 
     def _require_ready(self) -> None:
         self._require_connected()
-        if not self.state.homed:
+        if self.state.homed:
+            return
+        if self.homing_required:
             raise RuntimeError("Bitte zuerst eine Referenzfahrt ausfuehren.")
+        self._log("Start ohne Referenzfahrt: Homing ist im aktiven Maschinenprofil optional.")
 
     def _emit_progress(self, label: str, current: int, total: int) -> None:
         if self._progress is not None:

@@ -363,3 +363,30 @@ def test_disconnect_sets_abort_flag_for_active_job() -> None:
     controller.disconnect()
 
     assert controller._abort_requested.is_set()
+
+
+def test_unlock_sends_dollar_x_and_clears_alarm_without_homing() -> None:
+    controller = GrblSerialController(log=lambda _message: None, port_getter=lambda: "COM1")
+    serial = RealtimeSerial([b"[MSG:Caution: Unlocked]\r\n", b"ok\r\n"])
+    controller._serial = serial
+    controller._update_state_from_status("<Alarm|MPos:0.000,0.000,0.000|FS:0,0>")
+
+    controller.unlock()
+
+    assert b"$X\n" in serial.writes
+    assert not controller.state.alarm
+    assert controller.state.status == "Idle"
+    assert not controller.state.homed
+    controller.shutdown()
+
+
+def test_require_ready_follows_profile_homing_policy() -> None:
+    controller = GrblSerialController(log=lambda _message: None, port_getter=lambda: "COM1")
+    controller._serial = SilentSerial()
+
+    with pytest.raises(RuntimeError, match="Referenzfahrt"):
+        controller._require_ready()
+
+    controller.homing_required = False
+    controller._require_ready()
+    controller.shutdown()

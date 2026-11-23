@@ -215,6 +215,8 @@ class MachineControlMixin:
             self._auto_detect_laser()
         elif action_id == "home":
             self._run_worker(lambda: self.workflow.run_machine_action("Homing", self.app_controller.home))
+        elif action_id == "unlock_alarm":
+            self._run_worker(lambda: self.workflow.run_machine_action("Alarm entsperren", self.app_controller.unlock_alarm))
         elif action_id == "status":
             self._query_status()
         elif action_id == "settings":

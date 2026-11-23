@@ -78,7 +78,8 @@ ALLOWED_TRANSITIONS: dict[MachinePhase, set[MachinePhase]] = {
     MachinePhase.IDLE: {MachinePhase.RUNNING, MachinePhase.PAUSED, MachinePhase.STOPPING, MachinePhase.ALARM, MachinePhase.ERROR, MachinePhase.DISCONNECTED},
     MachinePhase.RUNNING: {MachinePhase.PAUSED, MachinePhase.STOPPING, MachinePhase.IDLE, MachinePhase.ALARM, MachinePhase.ERROR, MachinePhase.DISCONNECTED},
     MachinePhase.PAUSED: {MachinePhase.RUNNING, MachinePhase.STOPPING, MachinePhase.IDLE, MachinePhase.ALARM, MachinePhase.ERROR, MachinePhase.DISCONNECTED},
-    MachinePhase.ALARM: {MachinePhase.STOPPING, MachinePhase.ERROR, MachinePhase.DISCONNECTED, MachinePhase.IDLE},
+    # RUNNING: a homing cycle ($H) is the standard GRBL recovery from an alarm lock.
+    MachinePhase.ALARM: {MachinePhase.RUNNING, MachinePhase.STOPPING, MachinePhase.ERROR, MachinePhase.DISCONNECTED, MachinePhase.IDLE},
     MachinePhase.ERROR: {MachinePhase.DISCONNECTED, MachinePhase.CONNECTING, MachinePhase.IDLE},
     MachinePhase.STOPPING: {MachinePhase.IDLE, MachinePhase.DISCONNECTED, MachinePhase.ERROR, MachinePhase.ALARM},
 }
@@ -114,7 +115,14 @@ ALLOWED_ACTIONS: dict[MachinePhase, set[MachineAction]] = {
         MachineAction.EMERGENCY_STOP,
         MachineAction.STATUS,
     },
-    MachinePhase.ALARM: {MachineAction.DISCONNECT, MachineAction.STATUS, MachineAction.EMERGENCY_STOP, MachineAction.RESET},
+    # Recovery: HOME ($H) for machines with homing switches, RESET ($X unlock) for the rest.
+    MachinePhase.ALARM: {
+        MachineAction.DISCONNECT,
+        MachineAction.STATUS,
+        MachineAction.EMERGENCY_STOP,
+        MachineAction.HOME,
+        MachineAction.RESET,
+    },
     MachinePhase.ERROR: {MachineAction.CONNECT, MachineAction.DISCONNECT, MachineAction.STATUS, MachineAction.EMERGENCY_STOP, MachineAction.RESET},
     MachinePhase.STOPPING: {MachineAction.DISCONNECT, MachineAction.EMERGENCY_STOP, MachineAction.STATUS},
 }

@@ -433,6 +433,7 @@ class LaserControlWindow(
         job_layout.addLayout(pause_row)
         job_layout.addWidget(self._machine_action_button("stop", "Sidebar"))
         job_layout.addWidget(self._machine_action_button("emergency_stop", "Sidebar"))
+        job_layout.addWidget(self._machine_action_button("unlock_alarm", "Sidebar"))
         job_page_layout.addWidget(job)
         self._add_sidebar_section(sidebar_layout, "Job", job_page, True)
 

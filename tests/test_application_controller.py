@@ -238,3 +238,54 @@ def test_auto_home_is_skipped_when_option_or_job_kind_do_not_match() -> None:
     app._handle_auto_home_after_job(True, "Serie", "Job")
 
     assert controller.calls == []
+
+
+def _alarmed_simulator_app() -> ApplicationController:
+    app = ApplicationController(lambda _message: None, None, lambda: "")
+    app.connect()
+    app.home()
+    app.emergency_stop()
+    assert app.machine_state.phase == MachinePhase.ALARM
+    return app
+
+
+def test_alarm_can_be_cleared_by_homing() -> None:
+    app = _alarmed_simulator_app()
+
+    app.home()
+
+    assert app.machine_state.phase == MachinePhase.IDLE
+    assert app.controller.state.homed
+    assert not app.controller.state.alarm
+
+
+def test_alarm_can_be_unlocked_without_homing() -> None:
+    app = _alarmed_simulator_app()
+
+    app.unlock_alarm()
+
+    assert app.machine_state.phase == MachinePhase.IDLE
+    assert not app.controller.state.alarm
+    # $X does not reference the machine: jobs still need homing unless the profile allows otherwise.
+    assert not app.controller.state.homed
+
+
+def test_machine_profile_homing_policy_reaches_controller_readiness_check() -> None:
+    from dataclasses import replace
+
+    import pytest
+
+    from laser_control.machine_profiles import DEFAULT_MACHINE_PROFILE
+
+    app = ApplicationController(lambda _message: None, None, lambda: "")
+    app.connect()
+    with pytest.raises(RuntimeError, match="Referenzfahrt"):
+        app.controller.frame(10.0, 10.0)
+
+    app.set_machine_profile(replace(DEFAULT_MACHINE_PROFILE, homing_required=False))
+    assert app.controller.homing_required is False
+    app.controller.frame(10.0, 10.0)
+
+    app.switch_controller("GRBL ueber USB")
+    assert app.controller.homing_required is False
+    app.shutdown_controller()

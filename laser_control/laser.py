@@ -12,6 +12,7 @@ ProgressFn = Callable[[str, int, int], None]
 class SimulatedLaserController:
     def __init__(self, log: LogFn, progress: ProgressFn | None = None) -> None:
         self.state = LaserState()
+        self.homing_required = True
         self._log = log
         self._progress = progress
 
@@ -28,10 +29,20 @@ class SimulatedLaserController:
 
     def home(self) -> None:
         self._require_connected()
+        self.state.alarm = False
+        self.state.status = "Idle"
         self.state.homed = True
         self.state.x_mm = 0.0
         self.state.y_mm = 0.0
         self._log("Referenzfahrt simuliert. Position X0 Y0.")
+        self._emit_progress("Bereit", 1, 1)
+
+    def unlock(self) -> None:
+        self._require_connected()
+        self.state.alarm = False
+        self.state.status = "Idle"
+        self.state.homed = False
+        self._log("Alarm entsperren simuliert ($X). Position nicht referenziert.")
         self._emit_progress("Bereit", 1, 1)
 
     def jog(self, dx_mm: float, dy_mm: float) -> None:
@@ -169,8 +180,11 @@ class SimulatedLaserController:
 
     def _require_ready(self) -> None:
         self._require_connected()
-        if not self.state.homed:
+        if self.state.homed:
+            return
+        if self.homing_required:
             raise RuntimeError("Bitte zuerst eine Referenzfahrt ausfuehren.")
+        self._log("Start ohne Referenzfahrt: Homing ist im aktiven Maschinenprofil optional.")
 
     def _emit_progress(self, label: str, current: int, total: int) -> None:
         if self._progress is not None:

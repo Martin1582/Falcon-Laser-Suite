@@ -41,6 +41,7 @@ class ApplicationController:
         self.current_workspace_height = float(DEFAULT_MACHINE_PROFILE.work_area_height)
         self.work_area_trace_power_percent = WORK_AREA_TRACE_POINTER_POWER_PERCENT
         self.controller: LaserController = SimulatedLaserController(log, progress)
+        self._apply_homing_policy()
         self.job_controller = JobController(self._on_job_state_changed)
         self._work_area_trace_stop = threading.Event()
         self._work_area_trace_thread: threading.Thread | None = None
@@ -62,6 +63,7 @@ class ApplicationController:
             )
         else:
             self.controller = SimulatedLaserController(self._log, self._progress)
+        self._apply_homing_policy()
         self.connection_mode = connection_mode
         self.machine_state.transition(MachinePhase.DISCONNECTED, "Nicht verbunden")
         self._log(f"Modus gewechselt: {self.connection_mode}")
@@ -71,6 +73,7 @@ class ApplicationController:
         self.disable_work_area_trace("Maschinenprofilwechsel")
         self.ensure_alignment_laser_off("Maschinenprofilwechsel")
         self.machine_profile = profile
+        self._apply_homing_policy()
         self.set_current_workspace(profile.work_area_width, profile.work_area_height)
         self._log(
             "Maschinenprofil aktiv: "
@@ -79,6 +82,10 @@ class ApplicationController:
             f"Arbeitsbereich {profile.work_area_width:.1f} x {profile.work_area_height:.1f} mm, "
             f"Homing erforderlich: {'ja' if profile.homing_required else 'nein'}."
         )
+
+    def _apply_homing_policy(self) -> None:
+        """Hand the profile's homing requirement to the controller's readiness check."""
+        self.controller.homing_required = bool(self.machine_profile.homing_required)
 
     def set_current_workspace(self, width_mm: float, height_mm: float) -> None:
         self.current_workspace_width = max(1.0, float(width_mm))
@@ -162,6 +169,9 @@ class ApplicationController:
 
     def home(self) -> None:
         self.run_machine_action("Homing", lambda controller: controller.home(), MachineAction.HOME)
+
+    def unlock_alarm(self) -> None:
+        self.run_machine_action("Alarm entsperren", lambda controller: controller.unlock(), MachineAction.RESET)
 
     def jog(self, dx_mm: float, dy_mm: float, label: str = "Jog") -> None:
         self.run_machine_action(label, lambda controller: controller.jog(dx_mm, dy_mm), MachineAction.JOG)

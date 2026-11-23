@@ -60,3 +60,14 @@ def test_machine_action_registry_derives_enabled_state_from_machine_state() -> N
     assert registry.is_enabled("emergency_stop", paused)
     assert not registry.is_enabled("stop", idle)
     assert registry.is_enabled("emergency_stop", idle)
+
+
+def test_alarm_state_offers_home_and_unlock_as_recovery() -> None:
+    registry = MachineActionRegistry()
+    alarm = MachineState(phase=MachinePhase.ALARM)
+
+    assert registry.is_enabled("home", alarm)
+    assert registry.is_enabled("unlock_alarm", alarm)
+    assert not registry.is_enabled("start_job", alarm)
+    assert not registry.is_enabled("frame", alarm)
+    assert not registry.is_enabled("unlock_alarm", MachineState(phase=MachinePhase.IDLE))
