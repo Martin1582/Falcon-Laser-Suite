@@ -102,3 +102,40 @@ def test_transform_is_applied_after_optimization_without_changing_transform() ->
     assert transform.x_mm == 10.0
     assert transform.scale == 2.0
     assert transformed[0][0] == (10.0, 5.0)
+
+
+def test_duplicate_removal_keeps_contours_without_duplicates_intact() -> None:
+    from laser_control.fill_toolpath import build_fill_toolpath
+
+    rectangle = [[(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0), (0.0, 0.0)]]
+
+    deduped = remove_duplicate_segments(rectangle, 0.02)
+
+    assert deduped == rectangle
+    fill = build_fill_toolpath(deduped, "Gravur", 10, spacing_mm=1.0)
+    assert not fill.unsafe_fill
+    assert fill.line_count == build_fill_toolpath(rectangle, "Gravur", 10, spacing_mm=1.0).line_count
+
+
+def test_duplicate_removal_only_splits_where_a_duplicate_was_removed() -> None:
+    paths = [
+        [(0.0, 0.0), (1.0, 0.0)],
+        [(5.0, 5.0), (0.0, 0.0), (1.0, 0.0), (2.0, 0.0), (3.0, 1.0)],
+    ]
+
+    deduped = remove_duplicate_segments(paths, 0.02)
+
+    assert deduped == [
+        [(0.0, 0.0), (1.0, 0.0)],
+        [(5.0, 5.0), (0.0, 0.0)],
+        [(1.0, 0.0), (2.0, 0.0), (3.0, 1.0)],
+    ]
+
+
+def test_duplicate_removal_rejoins_a_closed_contour_cut_once() -> None:
+    shared_edge = [(4.0, 0.0), (4.0, 4.0)]
+    square = [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0), (0.0, 0.0)]
+
+    deduped = remove_duplicate_segments([shared_edge, square], 0.02)
+
+    assert deduped == [shared_edge, [(4.0, 4.0), (0.0, 4.0), (0.0, 0.0), (4.0, 0.0)]]

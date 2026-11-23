@@ -153,15 +153,34 @@ def count_duplicate_segments(paths: list[Polyline], tolerance_mm: float = 0.02) 
 
 
 def remove_duplicate_segments(paths: list[Polyline], tolerance_mm: float = 0.02) -> list[Polyline]:
+    """Drop segments that were already drawn, keeping the remaining geometry connected.
+
+    Kept segments stay joined in their original polylines, so contours without duplicates come
+    back unchanged (closed shapes stay closed and remain usable for fills). A path is only split
+    where a duplicate segment is removed.
+    """
     seen: set[tuple[tuple[int, int], tuple[int, int]]] = set()
     result: list[Polyline] = []
     for path in paths:
+        runs: list[Polyline] = []
+        current: Polyline = []
         for start, end in zip(path, path[1:]):
             key = _segment_key(start, end, tolerance_mm)
             if key in seen:
+                if len(current) >= 2:
+                    runs.append(current)
+                current = []
                 continue
             seen.add(key)
-            result.append([start, end])
+            if not current:
+                current = [start]
+            current.append(end)
+        if len(current) >= 2:
+            runs.append(current)
+        # A closed contour cut once: the last run ends where the first run starts - rejoin them.
+        if len(runs) > 1 and _is_closed(path) and runs[-1][-1] == runs[0][0]:
+            runs[0] = runs.pop() + runs[0][1:]
+        result.extend(runs)
     return result
 
 
