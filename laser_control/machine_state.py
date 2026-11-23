@@ -75,13 +75,14 @@ ConnectionLostEvent = MachineEvent
 ALLOWED_TRANSITIONS: dict[MachinePhase, set[MachinePhase]] = {
     MachinePhase.DISCONNECTED: {MachinePhase.CONNECTING, MachinePhase.IDLE, MachinePhase.ERROR},
     # ALARM: GRBL may report Alarm right after connecting (e.g. homing required after power-up).
-    MachinePhase.CONNECTING: {MachinePhase.IDLE, MachinePhase.ALARM, MachinePhase.ERROR, MachinePhase.DISCONNECTED},
+    # PAUSED: a controller can still be in Hold when connecting; Resume/Stop must stay usable.
+    MachinePhase.CONNECTING: {MachinePhase.IDLE, MachinePhase.ALARM, MachinePhase.PAUSED, MachinePhase.ERROR, MachinePhase.DISCONNECTED},
     MachinePhase.IDLE: {MachinePhase.RUNNING, MachinePhase.PAUSED, MachinePhase.STOPPING, MachinePhase.ALARM, MachinePhase.ERROR, MachinePhase.DISCONNECTED},
     MachinePhase.RUNNING: {MachinePhase.PAUSED, MachinePhase.STOPPING, MachinePhase.IDLE, MachinePhase.ALARM, MachinePhase.ERROR, MachinePhase.DISCONNECTED},
     MachinePhase.PAUSED: {MachinePhase.RUNNING, MachinePhase.STOPPING, MachinePhase.IDLE, MachinePhase.ALARM, MachinePhase.ERROR, MachinePhase.DISCONNECTED},
     # RUNNING: a homing cycle ($H) is the standard GRBL recovery from an alarm lock.
     MachinePhase.ALARM: {MachinePhase.RUNNING, MachinePhase.STOPPING, MachinePhase.ERROR, MachinePhase.DISCONNECTED, MachinePhase.IDLE},
-    MachinePhase.ERROR: {MachinePhase.DISCONNECTED, MachinePhase.CONNECTING, MachinePhase.IDLE, MachinePhase.ALARM},
+    MachinePhase.ERROR: {MachinePhase.DISCONNECTED, MachinePhase.CONNECTING, MachinePhase.IDLE, MachinePhase.ALARM, MachinePhase.PAUSED},
     MachinePhase.STOPPING: {MachinePhase.IDLE, MachinePhase.DISCONNECTED, MachinePhase.ERROR, MachinePhase.ALARM},
 }
 

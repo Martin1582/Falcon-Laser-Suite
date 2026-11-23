@@ -355,3 +355,22 @@ def test_alarm_status_after_error_is_not_rejected() -> None:
     state.transition(MachinePhase.ALARM, "Alarm")
 
     assert state.phase == MachinePhase.ALARM
+
+
+def test_hold_reported_on_connect_keeps_resume_available() -> None:
+    from laser_control.machine_state import MachineAction
+
+    class HoldOnConnectSimulator(SimulatedLaserController):
+        def connect(self) -> None:
+            super().connect()
+            self.state.paused = True
+            self.state.status = "Hold:0"
+
+    app = ApplicationController(lambda _message: None, None, lambda: "")
+    app.controller = HoldOnConnectSimulator(lambda _message: None)
+
+    app.connect()
+
+    assert app.machine_state.phase == MachinePhase.PAUSED
+    assert app.machine_state.can_perform(MachineAction.RESUME)
+    assert app.machine_state.can_perform(MachineAction.STOP)
