@@ -2,7 +2,7 @@ import re
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from laser_control.gcode import build_safe_frame_gcode, prepare_job_gcode
 from laser_control.models import LaserState
@@ -161,6 +161,8 @@ class GrblSerialController:
         self._missing_position_logged = False
         self._job_status_polling_logged = False
         self.grbl_settings: dict[int, float] = {}
+        # GRBL sends WCO only every few status reports; keep the last one to convert MPos.
+        self._last_wco: tuple[float, float, float] | None = None
 
     @property
     def _serial(self):
@@ -220,6 +222,7 @@ class GrblSerialController:
             if log_message:
                 self._log(f"Fehler beim Trennen: {exc}")
         self.state = LaserState()
+        self._last_wco = None
         if log_message:
             self._log("GRBL getrennt.")
         self._emit_progress("Getrennt", 0, 1)
@@ -271,6 +274,8 @@ class GrblSerialController:
         self._require_ready()
         if self.state.alignment_mode_active:
             self.disable_alignment_pointer()
+        # A Stop/Disconnect from an earlier operation must not cancel this new frame.
+        self._abort_requested.clear()
         commands = build_safe_frame_gcode(width_mm, height_mm, x_mm=x_mm, y_mm=y_mm)
         self._log(
             "Starte sichere Rahmenfahrt ohne Laser: "
@@ -282,6 +287,8 @@ class GrblSerialController:
             f"Groesse {width_mm:.2f} x {height_mm:.2f} mm."
         )
         for index, command in enumerate(commands, start=1):
+            if self._abort_requested.is_set():
+                raise RuntimeError("Rahmenfahrt durch Stop/Emergency Stop abgebrochen.")
             self._emit_progress("Rahmenfahrt", index - 1, len(commands))
             self.send_command(command, wait_seconds=5.0)
         self._wait_until_idle(timeout_seconds=60.0)
@@ -456,8 +463,8 @@ class GrblSerialController:
     def current_position(self) -> tuple[float, float]:
         self._require_connected()
         response = self._query_status_text()
-        report = parse_grbl_status_report(response)
         self._update_state_from_status(response)
+        report = self._with_cached_wco(parse_grbl_status_report(response))
         self._log_response(response)
         if report is None or report.x_mm is None or report.y_mm is None:
             raise RuntimeError("Keine Position im Statusreport gefunden.")
@@ -778,8 +785,20 @@ class GrblSerialController:
     def _is_hold_status(self, response: str) -> bool:
         return "<Hold" in response
 
+    def _with_cached_wco(self, report: GrblStatusReport | None) -> GrblStatusReport | None:
+        """Remember the latest WCO and apply it to MPos-only reports that omit it."""
+        if report is None:
+            return None
+        if report.wco_x is not None:
+            self._last_wco = (report.wco_x, report.wco_y or 0.0, report.wco_z or 0.0)
+            return report
+        if report.mpos_x is not None and report.wpos_x is None and self._last_wco is not None:
+            wco_x, wco_y, wco_z = self._last_wco
+            return replace(report, wco_x=wco_x, wco_y=wco_y, wco_z=wco_z)
+        return report
+
     def _update_state_from_status(self, response: str) -> None:
-        report = parse_grbl_status_report(response)
+        report = self._with_cached_wco(parse_grbl_status_report(response))
         if report is None:
             if response.strip():
                 self._log("Statusparser: keine GRBL-Statuszeile erkannt.")

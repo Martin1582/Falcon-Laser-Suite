@@ -390,3 +390,35 @@ def test_require_ready_follows_profile_homing_policy() -> None:
     controller.homing_required = False
     controller._require_ready()
     controller.shutdown()
+
+
+def test_work_offset_is_kept_for_status_reports_without_wco() -> None:
+    controller = GrblSerialController(log=lambda _message: None, port_getter=lambda: "COM1")
+
+    controller._update_state_from_status("<Idle|MPos:110.000,220.000,0.000|FS:0,0|WCO:100.000,200.000,0.000>")
+    first = (controller.state.x_mm, controller.state.y_mm, controller.state.position_source)
+    controller._update_state_from_status("<Idle|MPos:110.000,220.000,0.000|FS:0,0>")
+    second = (controller.state.x_mm, controller.state.y_mm, controller.state.position_source)
+
+    assert first == second == (10.0, 20.0, "WPos (MPos-WCO)")
+
+    controller.disconnect(log_message=False)
+    controller._update_state_from_status("<Idle|MPos:110.000,220.000,0.000|FS:0,0>")
+    assert (controller.state.x_mm, controller.state.y_mm) == (110.0, 220.0)
+    controller.shutdown()
+
+
+def test_frame_is_not_cancelled_by_an_earlier_stop() -> None:
+    controller = GrblSerialController(log=lambda _message: None, port_getter=lambda: "COM1")
+    controller._serial = RealtimeSerial([b"ok\r\n"] * 20)
+    controller.state.homed = True
+    controller._abort_requested.set()  # left over from a previous Stop/Disconnect
+    abort_seen_while_waiting: list[bool] = []
+    controller._wait_until_idle = lambda timeout_seconds: abort_seen_while_waiting.append(
+        controller._abort_requested.is_set()
+    )
+
+    controller.frame(20.0, 10.0)
+
+    assert abort_seen_while_waiting == [False]
+    controller.shutdown()
