@@ -382,7 +382,8 @@ class JobMixin:
             item for item in self.laser_project.items
             if item.active and item.is_raster
         ]
-        active_vectors = self._active_vector_item_paths()
+        active_vector_items = self._active_vector_items()
+        active_vectors = [(name, paths) for _item_id, name, paths in active_vector_items]
         if not self.laser_project.items and self._current_vector_paths():
             active_vectors = [("Motiv", self._current_vector_paths())]
         if active_rasters and not active_vectors:
@@ -441,11 +442,14 @@ class JobMixin:
                 if len(active_vectors) == 1 and len(self.laser_project.items) <= 1:
                     code = build_layered_polyline_gcode(active_vectors[0][1], layers, operation_mode, self.fill_toolpaths)
                 else:
-                    fills_by_name = {
-                        item.name: self._fill_toolpaths_by_item.get(item.item_id, [])
-                        for item in self.laser_project.items
-                    }
-                    code = build_multi_item_layered_polyline_gcode(active_vectors, layers, operation_mode, fills_by_name)
+                    # Key fills by the unique item ID: names repeat when an SVG is placed twice.
+                    code = build_multi_item_layered_polyline_gcode(
+                        active_vectors,
+                        layers,
+                        operation_mode,
+                        self._fill_toolpaths_by_item,
+                        item_keys=[item_id for item_id, _name, _paths in active_vector_items],
+                    )
             except ValueError as exc:
                 code = "\n".join(
                     [

@@ -149,3 +149,45 @@ def test_build_safe_frame_gcode_uses_transformed_origin() -> None:
         "G0 X250.00 Y100.00 F2400",
         "G0 X250.00 Y40.00 F2400",
     ]
+
+
+def _fill_layer() -> JobLayer:
+    from laser_control.layers import LayerMode
+
+    return JobLayer("Gravur", LayerType.ENGRAVE, True, True, 3000, 40, 10, 1, LayerMode.FILL, 1.0, 0)
+
+
+def _square(x: float) -> list[list[tuple[float, float]]]:
+    return [[(x, 0.0), (x + 4.0, 0.0), (x + 4.0, 3.0), (x, 3.0), (x, 0.0)]]
+
+
+def test_multi_item_fills_are_keyed_by_item_id_not_display_name() -> None:
+    from laser_control.fill_toolpath import build_layer_fill_toolpaths
+
+    layer = _fill_layer()
+    left, right = _square(10.0), _square(200.0)
+    fills = {
+        "item-a": build_layer_fill_toolpaths(left, [layer]),
+        "item-b": build_layer_fill_toolpaths(right, [layer]),
+    }
+
+    # The same SVG placed twice: identical display names, different positions.
+    code = build_multi_item_layered_polyline_gcode(
+        [("Logo.svg", left), ("Logo.svg", right)],
+        [layer],
+        fill_toolpaths_by_item=fills,
+        item_keys=["item-a", "item-b"],
+    )
+
+    first, second = code.split("; artwork 2: Logo.svg")
+    assert "X10." in first and "X200." not in first
+    assert "X200." in second and "X10." not in second
+
+
+def test_multi_item_gcode_rejects_misaligned_item_keys() -> None:
+    with pytest.raises(ValueError):
+        build_multi_item_layered_polyline_gcode(
+            [("A.svg", _square(0.0)), ("B.svg", _square(50.0))],
+            [_fill_layer()],
+            item_keys=["only-one"],
+        )

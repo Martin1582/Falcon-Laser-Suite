@@ -220,8 +220,18 @@ def build_multi_item_layered_polyline_gcode(
     layers: list[object],
     operation_mode: str = ENGRAVE_MODE,
     fill_toolpaths_by_item: dict[str, list["FillToolpath"]] | None = None,
+    item_keys: list[str] | None = None,
 ) -> str:
-    active_items = [(name, paths) for name, paths in item_paths if paths]
+    """Build G-code for several artworks.
+
+    ``fill_toolpaths_by_item`` is looked up by ``item_keys`` (one unique key per entry of
+    ``item_paths``, e.g. the project item ID). Display names are not unique - the same SVG can
+    be placed twice - so they are only used as fallback key when no ``item_keys`` are given.
+    """
+    if item_keys is not None and len(item_keys) != len(item_paths):
+        raise ValueError("item_keys muss genau einen Schluessel pro Motiv enthalten.")
+    keys = item_keys if item_keys is not None else [name for name, _paths in item_paths]
+    active_items = [(name, paths, key) for (name, paths), key in zip(item_paths, keys) if paths]
     if not active_items:
         raise ValueError("Keine aktiven Vektormotive fuer G-Code vorhanden.")
 
@@ -239,9 +249,9 @@ def build_multi_item_layered_polyline_gcode(
         "M5 ; laser off",
     ]
     fills_by_item = fill_toolpaths_by_item or {}
-    for item_index, (item_name, paths) in enumerate(active_items, start=1):
+    for item_index, (item_name, paths, item_key) in enumerate(active_items, start=1):
         lines.append(f"; artwork {item_index}: {item_name}")
-        item_fills = fills_by_item.get(item_name, [])
+        item_fills = fills_by_item.get(item_key, [])
         item_code = build_layered_polyline_gcode(paths, output_layers, operation_mode, item_fills).splitlines()
         lines.extend(line for line in item_code if line not in {"G21 ; millimeters", "G90 ; absolute positioning"})
     if not any(line.upper().startswith("M5") for line in lines[-2:]):

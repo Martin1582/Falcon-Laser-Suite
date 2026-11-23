@@ -203,15 +203,19 @@ class ArtworkMixin:
     def _selected_artwork_item(self) -> ArtworkItem | None:
         return next((item for item in self.laser_project.items if item.item_id == self.selected_artwork_item_id), None)
 
-    def _active_vector_item_paths(self) -> list[tuple[str, list]]:
-        result: list[tuple[str, list]] = []
+    def _active_vector_items(self) -> list[tuple[str, str, list]]:
+        """Active vector artworks as (unique item_id, display name, transformed paths)."""
+        result: list[tuple[str, str, list]] = []
         for item in self.laser_project.items:
             if not item.active:
                 continue
             paths = self._effective_item_vector_paths(item)
             if paths:
-                result.append((item.name, transform_paths(paths, item.transform)))
+                result.append((item.item_id, item.name, transform_paths(paths, item.transform)))
         return result
+
+    def _active_vector_item_paths(self) -> list[tuple[str, list]]:
+        return [(name, paths) for _item_id, name, paths in self._active_vector_items()]
 
     def _visible_preview_items(self) -> list[PreviewArtworkItem]:
         items: list[PreviewArtworkItem] = []
