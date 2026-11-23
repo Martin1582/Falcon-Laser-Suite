@@ -422,3 +422,19 @@ def test_frame_is_not_cancelled_by_an_earlier_stop() -> None:
 
     assert abort_seen_while_waiting == [False]
     controller.shutdown()
+
+
+def test_emergency_stop_sends_soft_reset_before_any_laser_off_command(monkeypatch) -> None:
+    monkeypatch.setattr("laser_control.serial_grbl.time.sleep", lambda _seconds: None)
+    controller = GrblSerialController(log=lambda _message: None, port_getter=lambda: "COM1")
+    serial = RealtimeSerial([])  # no acknowledgements at all
+    controller._serial = serial
+    controller.state.alignment_mode_active = True
+
+    controller.emergency_stop()
+
+    assert serial.writes[0] == b"\x18"
+    assert not any(value.startswith((b"M5", b"S0")) for value in serial.writes)
+    assert not controller.state.alignment_mode_active
+    assert controller.state.alarm
+    controller.shutdown()

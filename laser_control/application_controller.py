@@ -238,13 +238,17 @@ class ApplicationController:
         if not self.require_action(MachineAction.EMERGENCY_STOP, "Sicherheitsstopp"):
             raise RuntimeError("Sicherheitsstopp ist im aktuellen Maschinenzustand nicht erlaubt.")
         self.machine_state.transition(MachinePhase.STOPPING, "Sicherheitsstopp")
+        # Non-blocking: tell a running work-area trace thread to stop issuing new moves.
+        self._work_area_trace_stop.set()
         try:
+            # The prioritized soft reset (Ctrl-X) goes out first. It cancels streaming and turns
+            # the laser off in GRBL; the blocking M5/S0 cleanup must not delay it.
+            self.job_controller.emergency_stop(self.controller)
             try:
                 self.disable_work_area_trace("Sicherheitsstopp")
                 self.ensure_alignment_laser_off("Sicherheitsstopp")
-            except Exception as exc:  # noqa: BLE001 - emergency stop must still be sent
-                self._log(f"Fehler bei Ausrichtmodus-Abschaltung vor Sicherheitsstopp: {exc}")
-            self.job_controller.emergency_stop(self.controller)
+            except Exception as exc:  # noqa: BLE001 - reset already sent; cleanup is best effort
+                self._log(f"Aufraeumen nach Sicherheitsstopp unvollstaendig: {exc}")
             self.handle_machine_event(
                 MachineEvent(
                     MachineEventType.ALARM,

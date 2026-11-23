@@ -431,11 +431,8 @@ class GrblSerialController:
 
     def emergency_stop(self) -> None:
         self._require_connected()
-        if self.state.alignment_mode_active:
-            try:
-                self.disable_alignment_pointer()
-            except Exception as exc:
-                self._log(f"Ausrichtlaser konnte vor Sicherheitsstopp nicht bestaetigt ausgeschaltet werden: {exc}")
+        # Ctrl-X first, without waiting for any acknowledgement: the soft reset also switches the
+        # laser (including the alignment pointer) off, so no blocking M5/S0 may precede it.
         self._diagnostic_tx("0x18 emergency soft reset")
         self._abort_requested.set()
         self._log("Sicherheitsstopp angefordert: Queue wird sofort geleert und Ctrl-X mit hoechster Prioritaet gesendet.")
@@ -448,6 +445,10 @@ class GrblSerialController:
         self.state.paused = False
         self.state.alarm = True
         self.state.status = "EmergencyStop"
+        if self.state.alignment_mode_active:
+            self._log("Ausrichtlaser durch Soft-Reset ausgeschaltet.")
+        self.state.alignment_mode_active = False
+        self.state.pointer_power_percent = DEFAULT_POINTER_POWER_PERCENT
         self._log("Sicherheitsstopp ausgefuehrt. Bewusstes Reset/Unlock/Re-Homing vor weiterer Bewegung erforderlich.")
         self._emit_progress("Sicherheitsstopp", 0, 1)
 

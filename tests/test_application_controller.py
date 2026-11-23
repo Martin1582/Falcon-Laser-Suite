@@ -289,3 +289,27 @@ def test_machine_profile_homing_policy_reaches_controller_readiness_check() -> N
     app.switch_controller("GRBL ueber USB")
     assert app.controller.homing_required is False
     app.shutdown_controller()
+
+
+def test_emergency_stop_resets_controller_before_blocking_cleanup() -> None:
+    calls: list[str] = []
+
+    class RecordingSimulator(SimulatedLaserController):
+        def emergency_stop(self) -> None:
+            calls.append("emergency_stop")
+            super().emergency_stop()
+
+        def disable_alignment_pointer(self) -> None:
+            calls.append("laser_off")
+            super().disable_alignment_pointer()
+
+    app = ApplicationController(lambda _message: None, None, lambda: "")
+    app.controller = RecordingSimulator(lambda _message: None)
+    app.connect()
+    app.home()
+    calls.clear()
+
+    app.emergency_stop()
+
+    assert calls[0] == "emergency_stop"
+    assert app.machine_state.phase == MachinePhase.ALARM
