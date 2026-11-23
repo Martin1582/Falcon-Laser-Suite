@@ -1658,3 +1658,53 @@ def test_pyside_preflight_blocks_active_item_whose_source_is_missing(monkeypatch
     assert not preflight.can_start
     assert any("Motivquelle nicht geladen" in blocker and "badge.svg" in blocker for blocker in preflight.blockers)
     loaded.close()
+
+
+def test_pyside_vector_transform_matches_geometry_not_svg_document(monkeypatch, tmp_path) -> None:
+    svg = tmp_path / "padded.svg"
+    # 100 x 100 mm document containing only a 10 x 10 mm square in its centre.
+    svg.write_text(
+        '<svg width="100mm" height="100mm" viewBox="0 0 100 100"><polyline points="45,45 55,45 55,55 45,55 45,45"/></svg>',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("PySide6.QtWidgets.QFileDialog.getOpenFileName", lambda *_a, **_k: (str(svg), ""))
+    app = QApplication.instance() or QApplication([])
+    window = LaserControlWindow()
+    window._import_svg()
+
+    def toolpath_width() -> float:
+        xs = [point[0] for path in window._active_vector_items()[0][2] for point in path]
+        return max(xs) - min(xs)
+
+    transform = window.laser_project.items[0].transform
+    assert transform.current_width_mm == pytest.approx(toolpath_width())
+    assert transform.current_width_mm == pytest.approx(10.0)
+    window.close()
+
+
+def test_pyside_deactivated_selected_raster_does_not_block_vector_job(monkeypatch, tmp_path) -> None:
+    from PIL import Image
+
+    svg = tmp_path / "logo.svg"
+    svg.write_text(
+        '<svg width="10mm" height="10mm" viewBox="0 0 10 10"><polyline points="0,0 10,0 10,10 0,10 0,0"/></svg>',
+        encoding="utf-8",
+    )
+    png = tmp_path / "photo.png"
+    Image.new("L", (20, 20), 128).save(png, dpi=(254, 254))
+    app = QApplication.instance() or QApplication([])
+    window = LaserControlWindow()
+    for path in (svg, png):
+        monkeypatch.setattr("PySide6.QtWidgets.QFileDialog.getOpenFileName", lambda *_a, _p=path, **_k: (str(_p), ""))
+        window._import_svg()
+    raster_item = window.laser_project.items[1]
+    assert raster_item.is_raster and window.selected_artwork_item_id == raster_item.item_id
+    def raster_available() -> bool:
+        return window._job_context(window.app_controller.controller, "G0 X0 Y0").raster_gcode_available
+
+    assert not raster_available()
+
+    raster_item.active = False  # user unticks the raster in the object list; it stays selected
+
+    assert raster_available()
+    window.close()

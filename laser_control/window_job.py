@@ -96,7 +96,7 @@ class JobMixin:
             max_power=self.machine_profile.max_power,
             source_name=source_name,
             source_type=source_type,
-            raster_gcode_available=not any(item.active and item.is_raster for item in self.laser_project.items) and not bool(self.raster_sources),
+            raster_gcode_available=self._raster_output_available(),
             autofit_applied=bool(self.autofit_result and self.autofit_result.applied),
             source_original_width_mm=self.autofit_result.original_width_mm if self.autofit_result else None,
             source_original_height_mm=self.autofit_result.original_height_mm if self.autofit_result else None,
@@ -301,6 +301,13 @@ class JobMixin:
             f"{bounds}, "
             f"ca. {analysis.estimated_runtime_label}."
         )
+
+    def _raster_output_available(self) -> bool:
+        """False while an active raster artwork would need (not yet implemented) raster G-code."""
+        if self.laser_project.items:
+            # Only active items count; raster_sources may still hold a selected but inactive raster.
+            return not any(item.active and item.is_raster for item in self.laser_project.items)
+        return not self.raster_sources
 
     def _missing_source_blockers(self) -> list[str]:
         """Active artworks whose source could not be loaded would be silently left out of the job."""

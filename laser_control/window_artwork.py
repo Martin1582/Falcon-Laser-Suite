@@ -447,6 +447,12 @@ class ArtworkMixin:
     def _default_transform_for_source(self, source: object) -> ArtworkTransform:
         width = float(getattr(source, "width_mm", 1.0))
         height = float(getattr(source, "height_mm", 1.0))
+        if isinstance(source, VectorArtworkSource) and source.paths:
+            # Vector paths are normalized to their geometric bounds, so the transform must use the
+            # geometry size - not the SVG document size, which includes surrounding whitespace.
+            min_x, min_y, max_x, max_y = path_bounds(source.paths)
+            width = max(max_x - min_x, 0.01)
+            height = max(max_y - min_y, 0.01)
         result = self.autofit_service.fit(
             width,
             height,
