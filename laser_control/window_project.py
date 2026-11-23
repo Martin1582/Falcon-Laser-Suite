@@ -182,17 +182,30 @@ class ProjectMixin:
         placement = data.get("svg_placement") or {}
         if data.get("operation_mode"):
             self.operation_mode.setCurrentText(data["operation_mode"])
-        self.svg_auto.setChecked(placement.get("mode", "Automatisch") == "Automatisch")
-        self.svg_manual_width.setValue(float(placement.get("manual_width", self.svg_manual_width.value())))
-        self.artwork_height.setValue(float(placement.get("manual_height", self.artwork_height.value())))
-        self.artwork_scale_percent.setValue(float(placement.get("scale_percent", self.artwork_scale_percent.value())))
-        self.artwork_rotation.setValue(float(placement.get("rotation_deg", self.artwork_rotation.value())))
-        self.artwork_keep_aspect.setChecked(bool(placement.get("keep_aspect_ratio", True)))
-        self.svg_offset_x.setValue(float(placement.get("offset_x", 0)))
-        self.svg_offset_y.setValue(float(placement.get("offset_y", 0)))
-        self.svg_margin.setValue(float(placement.get("margin", AUTO_FIT_MARGIN_MM)))
-        self.material_shape.setCurrentText(placement.get("material_shape", MATERIAL_SHAPE_RECTANGLE))
-        self.job_origin.setCurrentText(placement.get("job_origin", JOB_ORIGIN_LOWER_LEFT))
+        # Restoring the controls must not feed back into the artwork: the transform handlers would
+        # otherwise write the saved values (possibly of another selected item) into the item that
+        # was selected on load. The persisted transforms are the source of truth.
+        self._transform_ui_updating = True
+        try:
+            self.svg_auto.setChecked(placement.get("mode", "Automatisch") == "Automatisch")
+            self.svg_manual_width.setValue(float(placement.get("manual_width", self.svg_manual_width.value())))
+            self.artwork_height.setValue(float(placement.get("manual_height", self.artwork_height.value())))
+            self.artwork_scale_percent.setValue(float(placement.get("scale_percent", self.artwork_scale_percent.value())))
+            self.artwork_rotation.setValue(float(placement.get("rotation_deg", self.artwork_rotation.value())))
+            self.artwork_keep_aspect.setChecked(bool(placement.get("keep_aspect_ratio", True)))
+            self.svg_offset_x.setValue(float(placement.get("offset_x", 0)))
+            self.svg_offset_y.setValue(float(placement.get("offset_y", 0)))
+            self.svg_margin.setValue(float(placement.get("margin", AUTO_FIT_MARGIN_MM)))
+            self.material_shape.setCurrentText(placement.get("material_shape", MATERIAL_SHAPE_RECTANGLE))
+            self.job_origin.setCurrentText(placement.get("job_origin", JOB_ORIGIN_LOWER_LEFT))
+        finally:
+            self._transform_ui_updating = False
+        if self.artwork_transform is not None:
+            # Show the persisted transform of the selected item (or of the legacy source).
+            self._sync_transform_controls()
+        elif not self.laser_project.items and self.original_imported_paths:
+            # Legacy vector project without stored transform: place it once from the restored settings.
+            self._apply_svg_placement()
         if data.get("layers"):
             try:
                 self.layer_panel.set_layers([layer_from_dict(item) for item in data.get("layers", [])])

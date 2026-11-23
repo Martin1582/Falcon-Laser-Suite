@@ -1590,3 +1590,39 @@ def test_pyside_pause_and_stop_enable_when_worker_switches_to_running() -> None:
     assert window.action_buttons["stop"][0].isEnabled()
     assert not window.action_buttons["start_job"][0].isEnabled()
     window.close()
+
+
+def test_pyside_load_project_keeps_first_item_when_other_item_was_selected(monkeypatch, tmp_path) -> None:
+    svg = tmp_path / "logo.svg"
+    svg.write_text(
+        '<svg width="10mm" height="10mm" viewBox="0 0 10 10"><polyline points="0,0 10,0 10,10 0,10 0,0"/></svg>',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("PySide6.QtWidgets.QFileDialog.getOpenFileName", lambda *_args, **_kwargs: (str(svg), ""))
+    app = QApplication.instance() or QApplication([])
+    window = LaserControlWindow()
+    window._import_svg()
+    window._import_svg()
+    first, second = window.laser_project.items
+    window._select_artwork_item(second.item_id)
+    window.svg_offset_x.setValue(first.transform.x_mm + 123.0)  # move only the selected item
+    window.svg_offset_y.setValue(first.transform.y_mm + 45.0)
+    saved = {item.item_id: (item.transform.x_mm, item.transform.y_mm) for item in window.laser_project.items}
+    assert saved[first.item_id] != saved[second.item_id]
+    project_path = tmp_path / "two-items.laser.json"
+    window.current_project_path = str(project_path)
+    window._save_project()
+    window.close()
+
+    monkeypatch.setattr(
+        "PySide6.QtWidgets.QFileDialog.getOpenFileName",
+        lambda *_args, **_kwargs: (str(project_path), ""),
+    )
+    loaded = LaserControlWindow()
+    loaded._load_project()
+
+    restored = {item.item_id: (item.transform.x_mm, item.transform.y_mm) for item in loaded.laser_project.items}
+    assert restored == saved
+    selected = loaded._selected_artwork_item()
+    assert loaded.svg_offset_x.value() == pytest.approx(selected.transform.x_mm)
+    loaded.close()
