@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 
 from laser_control.gcode import CUT_MODE
 from laser_control.fill_toolpath import FillToolpath
-from laser_control.layers import JobLayer, active_output_layers, layer_validation_warnings
+from laser_control.layers import JobLayer, active_output_layers, layer_validation_warnings, operation_mode_layer_blockers
 from laser_control.machine_log import MachineActionLog, MachineLogStatus
 from laser_control.machine_state import MachinePhase
 from laser_control.models import MaterialProfile
@@ -337,6 +337,7 @@ class WorkflowController:
         warnings = list(context.extra_warnings)
         warnings.append("Frame-Test vor Hardwarestart empfohlen.")
         warnings.extend(layer_validation_warnings(context.layers))
+        blockers.extend(self._operation_mode_blockers(context))
         for toolpath in context.fill_toolpaths:
             warnings.extend(f"Layer '{toolpath.layer_name}': {warning}" for warning in toolpath.warnings)
         fill_by_order = {toolpath.layer_order: toolpath for toolpath in context.fill_toolpaths}
@@ -431,6 +432,13 @@ class WorkflowController:
             "\n".join(result.start_condition_lines()),
         )
         return result
+
+    @staticmethod
+    def _operation_mode_blockers(context: JobContext) -> list[str]:
+        # Die Testmatrix bringt eigene Parameter mit und nutzt die Layer nicht.
+        if context.source_type == "generated":
+            return []
+        return operation_mode_layer_blockers(context.layers, context.operation_mode)
 
     def run_machine_action(self, action_name: str, action: Callable[[], None], success_name: str | None = None) -> None:
         self.record_action(action_name, MachineLogStatus.INFO)

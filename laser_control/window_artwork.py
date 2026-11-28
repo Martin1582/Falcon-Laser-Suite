@@ -266,15 +266,9 @@ class ArtworkMixin:
 
     def _select_artwork_item(self, item_id: str | None) -> None:
         if item_id is None:
-            self.selected_artwork_item_id = None
-            self.artwork_source = None
-            self.artwork_transform = None
-            self.original_imported_paths = []
-            self.imported_paths = []
-            self.raster_sources = []
-            self.original_raster_source = None
+            self._clear_selected_artwork_state()
+            self._show_empty_selection_labels()
             self._refresh_object_table()
-            self._sync_transform_controls()
             self._draw_preview()
             return
         item = next((candidate for candidate in self.laser_project.items if candidate.item_id == item_id), None)
@@ -367,8 +361,12 @@ class ArtworkMixin:
                     self.object_table.setItem(row, column, table_item)
                 if item.item_id == self.selected_artwork_item_id:
                     self.object_table.selectRow(row)
+            if self._selected_artwork_item() is None:
+                # Nach dem Schrumpfen der Tabelle darf keine alte Zeilenauswahl stehen bleiben.
+                self.object_table.clearSelection()
         finally:
             self._object_list_updating = False
+        self._sync_project_edit_actions()
 
     def _object_table_item_changed(self, table_item: QTableWidgetItem) -> None:
         if self._object_list_updating:
@@ -436,7 +434,6 @@ class ArtworkMixin:
             self._item_original_rasters[item.item_id] = source
             self._sync_transform_controls()
             self._set_svg_size_label(fitted_source.width_mm, fitted_source.height_mm, source_label=f"Raster: {source.file_name}")
-            self._sync_layers_from_controls(preserve_states=False)
             self._refresh_gcode()
             self._draw_preview()
             self._update_assistant_panel()

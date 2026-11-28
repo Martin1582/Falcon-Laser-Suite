@@ -5,11 +5,19 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 from laser_control.artwork_import import ArtworkSourceType, RasterImageSource, VectorArtworkSource
 from laser_control.artwork_scaling import AutoFitResult
 from laser_control.artwork_transform import normalize_paths, transform_paths
+from laser_control.layer_compat import repair_legacy_raster_layers
 from laser_control.layers import layer_from_dict, layer_to_dict
 from laser_control.job_history import export_job_history, import_job_history
 from laser_control.models import MaterialProfile
 from laser_control.project import laser_project_from_dict, load_project, project_to_dict, save_project
+from laser_control.services.assistant_service import is_test_matrix_gcode
 from laser_control.ui_common import AUTO_FIT_MARGIN_MM, JOB_ORIGIN_LOWER_LEFT, MATERIAL_SHAPE_RECTANGLE
+
+LEGACY_LAYER_REPAIR_MESSAGE = (
+    "Dieses Projekt wurde mit einer aelteren Version gespeichert, in der ein Rasterbild die Layer "
+    "veraendert hat. Die Layer wurden beim Laden korrigiert:\n\n{notes}\n\n"
+    "Die Projektdatei bleibt unveraendert, bis Sie das Projekt speichern."
+)
 
 
 class ProjectMixin:
@@ -71,19 +79,12 @@ class ProjectMixin:
         self.speed_mm_min.setValue(profile.speed_mm_min)
         self.passes.setValue(profile.passes)
         self.current_project_path = path
+        self._clear_selected_artwork_state()
         self.imported_paths = data.get("imported_paths", [])
         self.original_imported_paths = self.imported_paths
         self.imported_file = data.get("imported_file")
-        self.raster_sources = []
-        self.artwork_source = None
-        self.original_raster_source = None
-        self.autofit_result = None
-        self.artwork_transform = None
-        self.laser_project = laser_project_from_dict(data.get("laser_project") or {})
-        self._item_sources = {}
-        self._item_vector_paths = {}
-        self._item_original_rasters = {}
-        self._fill_toolpaths_by_item = {}
+        # Neues Projekt setzen und alle Motiv-Caches der alten IDs verwerfen.
+        self.project_workspace.replace_project(laser_project_from_dict(data.get("laser_project") or {}))
         for item in self.laser_project.items:
             if not item.source_path:
                 continue
@@ -182,6 +183,53 @@ class ProjectMixin:
         placement = data.get("svg_placement") or {}
         if data.get("operation_mode"):
             self.operation_mode.setCurrentText(data["operation_mode"])
+        self._restore_svg_placement(placement)
+        if self.artwork_transform is not None:
+            # Show the persisted transform of the selected item (or of the legacy source).
+            self._sync_transform_controls()
+        elif not self.laser_project.items and self.original_imported_paths:
+            # Legacy vector project without stored transform: place it once from the restored settings.
+            self._apply_svg_placement()
+        repair_notes = self._restore_layers(data)
+        gcode = data.get("gcode", "")
+        self.gcode_text.setPlainText(gcode)
+        # A saved test matrix is a generated job, also when the project still holds artwork items.
+        self._generated_job_name = "Testmatrix" if is_test_matrix_gcode(gcode) else None
+        self._update_material_measurement_label()
+        self._draw_preview()
+        self.log(f"Projekt geladen: {path}")
+        if repair_notes:
+            self._report_legacy_layer_repair(repair_notes)
+
+    def _restore_layers(self, data: dict) -> list[str]:
+        """Setzt die gespeicherten Layer; liefert Hinweise, falls ein Altprojekt korrigiert wurde.
+
+        Die Korrektur wirkt nur im Speicher. Die Datei aendert sich erst beim naechsten Speichern.
+        """
+        if not data.get("layers"):
+            self._sync_layers_from_controls(preserve_states=False)
+            return []
+        try:
+            layers = [layer_from_dict(item) for item in data.get("layers", [])]
+            repair = repair_legacy_raster_layers(layers, self.operation_mode.currentText())
+            self.layer_panel.set_layers(repair.layers)
+        except Exception as exc:  # noqa: BLE001 - load project should remain usable
+            self.log(f"Layerdaten konnten nicht geladen werden: {exc}")
+            self._sync_layers_from_controls(preserve_states=False)
+            return []
+        return repair.notes
+
+    def _report_legacy_layer_repair(self, notes: list[str]) -> None:
+        for note in notes:
+            self.log(note)
+        if self.laser_project.items and not self._generated_job_name:
+            # Der gespeicherte G-Code beruht auf den alten Layern; Preflight und Start sollen den
+            # korrigierten nutzen. Eine gespeicherte Testmatrix nutzt keine Layer und bleibt erhalten.
+            self._refresh_gcode()
+        QMessageBox.information(self, "Projekt laden", LEGACY_LAYER_REPAIR_MESSAGE.format(notes="\n\n".join(notes)))
+
+    def _restore_svg_placement(self, placement: dict) -> None:
+        """Setzt die Platzierungs-Controls aus gespeicherten Daten (fehlende Schluessel: Defaults)."""
         # Restoring the controls must not feed back into the artwork: the transform handlers would
         # otherwise write the saved values (possibly of another selected item) into the item that
         # was selected on load. The persisted transforms are the source of truth.
@@ -200,24 +248,6 @@ class ProjectMixin:
             self.job_origin.setCurrentText(placement.get("job_origin", JOB_ORIGIN_LOWER_LEFT))
         finally:
             self._transform_ui_updating = False
-        if self.artwork_transform is not None:
-            # Show the persisted transform of the selected item (or of the legacy source).
-            self._sync_transform_controls()
-        elif not self.laser_project.items and self.original_imported_paths:
-            # Legacy vector project without stored transform: place it once from the restored settings.
-            self._apply_svg_placement()
-        if data.get("layers"):
-            try:
-                self.layer_panel.set_layers([layer_from_dict(item) for item in data.get("layers", [])])
-            except Exception as exc:  # noqa: BLE001 - load project should remain usable
-                self.log(f"Layerdaten konnten nicht geladen werden: {exc}")
-                self._sync_layers_from_controls(preserve_states=False)
-        else:
-            self._sync_layers_from_controls(preserve_states=False)
-        self.gcode_text.setPlainText(data.get("gcode", ""))
-        self._update_material_measurement_label()
-        self._draw_preview()
-        self.log(f"Projekt geladen: {path}")
 
     def _export_profiles(self) -> None:
         path, _filter = QFileDialog.getSaveFileName(self, "Profile exportieren", "", "JSON (*.json)")

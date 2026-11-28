@@ -14,6 +14,9 @@ Geprueft werden unter anderem:
 - Homing gemaess Maschinenprofil
 - Arbeitsbereich, Port und Baudrate aus aktivem Maschinenprofil
 - sichere SVG-Fuellung: offene oder verschachtelte Konturen blockieren Fill-Jobs
+- Modus Cutten: Sind Ausgabelayer aktiv, aber kein Schnitt-Layer, blockiert der Preflight den Start
+  (Abhilfe: Schnitt-Layer aktivieren oder Modus Gravieren waehlen). Eine erzeugte Testmatrix ist
+  ausgenommen, weil sie eigene Parameter mitbringt.
 
 Wenn ein Maschinenprofil Homing optional erlaubt und keine Referenzfahrt erkannt wurde, muss der Nutzer im Preflight bewusst bestaetigen, dass ohne Homing gestartet werden soll. Diese Entscheidung wird nicht global gespeichert.
 

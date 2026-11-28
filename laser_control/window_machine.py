@@ -290,6 +290,9 @@ class MachineControlMixin:
         counted_worker = not allow_while_busy
         if counted_worker:
             self.worker_busy = True
+            # Projektaenderungen sofort sperren, nicht erst beim naechsten Phasenwechsel.
+            if hasattr(self, "project_edit_actions"):
+                self._sync_project_edit_actions()
             self._set_progress("Laeuft", 0, 1)
 
         def target() -> None:
@@ -358,6 +361,8 @@ class MachineControlMixin:
                     button.setToolTip(definition.tooltip)
         self._sync_alignment_indicator()
         self._sync_work_area_trace_indicator()
+        if hasattr(self, "project_edit_actions"):
+            self._sync_project_edit_actions()
 
     def _alignment_power_changed(self, value: int) -> None:
         if not hasattr(self, "app_controller"):

@@ -43,3 +43,15 @@ def test_assistant_generates_test_matrix_gcode() -> None:
     assert "Testmatrix" in gcode
     assert gcode.count("; Feld") == 9
     assert "M4 ; dynamic laser power" in gcode
+
+
+def test_generated_test_matrix_is_recognised_by_its_header() -> None:
+    from laser_control.services.assistant_service import is_test_matrix_gcode
+
+    profile = MaterialProfile("Birke 3 mm", 40, 1200, 1)
+    matrix = AssistantService().build_test_matrix_gcode(profile.name, ENGRAVE_MODE, profile)
+
+    assert is_test_matrix_gcode(matrix)
+    assert is_test_matrix_gcode("\n\n" + matrix)
+    assert not is_test_matrix_gcode("; Laser Control\nG0 X0 Y0\n; Testmatrix fuer X")
+    assert not is_test_matrix_gcode("")

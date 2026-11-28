@@ -88,6 +88,31 @@ def layer_validation_warnings(layers: list[JobLayer]) -> list[str]:
     return warnings
 
 
+CUT_MODE_WITHOUT_CUT_LAYER = (
+    "Modus Cutten: Kein Schnitt-Layer aktiv. Die Motive wuerden mit Layer {layers} ausgegeben. "
+    "Schnitt-Layer aktivieren oder Modus Gravieren waehlen."
+)
+CUT_MODE_WITHOUT_CUT_LAYER_MULTIPLE = (
+    "Modus Cutten: Kein Schnitt-Layer aktiv. Die Motive wuerden mit den Layern {layers} ausgegeben. "
+    "Schnitt-Layer aktivieren oder Modus Gravieren waehlen."
+)
+
+
+def operation_mode_layer_blockers(layers: list[JobLayer], operation_mode: str) -> list[str]:
+    """Blockiert Cutten, wenn Ausgabelayer aktiv sind, aber keiner davon der Schnitt-Layer ist.
+
+    Ohne aktive Ausgabelayer greift bereits layer_validation_warnings.
+    """
+    if operation_mode != CUT_MODE:
+        return []
+    output_layers = active_output_layers(layers)
+    if not output_layers or any(layer.layer_type == LayerType.CUT for layer in output_layers):
+        return []
+    names = ", ".join(f"'{layer.name}'" for layer in output_layers)
+    template = CUT_MODE_WITHOUT_CUT_LAYER if len(output_layers) == 1 else CUT_MODE_WITHOUT_CUT_LAYER_MULTIPLE
+    return [template.format(layers=names)]
+
+
 def layer_to_dict(layer: JobLayer) -> dict:
     return {
         "name": layer.name,

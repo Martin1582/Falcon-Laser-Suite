@@ -55,6 +55,7 @@ from laser_control.preview_model import (
 )
 from laser_control.qt_panels import LayerPanel, WorkspaceScanPanel
 from laser_control.project import LaserProject
+from laser_control.project_workspace import ProjectWorkspace
 from laser_control.services.assistant_service import AssistantService
 from laser_control.services.job_service import JobService
 from laser_control.services.profile_service import ProfileService
@@ -65,10 +66,11 @@ from laser_control.window_machine import MachineControlMixin
 from laser_control.window_job import JobMixin
 from laser_control.window_materials import MaterialMixin
 from laser_control.window_artwork import ArtworkMixin
+from laser_control.window_item_state import ItemStateBindingMixin
+from laser_control.window_project_lifecycle import ProjectLifecycleMixin
 from laser_control.window_project import ProjectMixin
 from laser_control.window_status import StatusSummaryMixin
 from laser_control.window_theme import ThemeMixin
-from laser_control.ui_common import WorkerSignals
 from laser_control.work_area_preview import WorkAreaPreview
 from laser_control.ui_common import AUTO_FIT_MARGIN_MM, JOB_ORIGIN_CENTER, JOB_ORIGIN_LOWER_LEFT, MATERIAL_SHAPE_CIRCLE, MATERIAL_SHAPE_RECTANGLE, WorkerSignals
 
@@ -79,8 +81,10 @@ class LaserControlWindow(
     MaterialMixin,
     ArtworkMixin,
     ProjectMixin,
+    ProjectLifecycleMixin,
     StatusSummaryMixin,
     ThemeMixin,
+    ItemStateBindingMixin,
     QMainWindow,
 ):
     def __init__(self) -> None:
@@ -94,22 +98,15 @@ class LaserControlWindow(
         self.imported_file = None
         self.artwork_source = None
         self.artwork_transform: ArtworkTransform | None = None
-        self.laser_project = LaserProject(300.0, 200.0)
+        # Projekt und Motiv-Caches; laser_project/_item_* leiten per Property hierher um.
+        self.project_workspace = ProjectWorkspace(LaserProject(300.0, 200.0))
         self.selected_artwork_item_id: str | None = None
         self._object_list_updating = False
-        self._item_sources: dict[str, object] = {}
-        self._item_vector_paths: dict[str, list] = {}
-        self._item_optimized_vector_paths: dict[str, list] = {}
-        self._item_svg_analyses: dict[str, SvgVectorAnalysis] = {}
-        self._item_svg_optimization_results: dict[str, SvgOptimizationResult] = {}
-        self._item_original_rasters: dict[str, RasterImageSource] = {}
-        self._fill_toolpaths_by_item: dict[str, list[FillToolpath]] = {}
         self.svg_optimized_paths: list = []
         self.svg_analysis: SvgVectorAnalysis | None = None
         self.svg_optimization_result: SvgOptimizationResult | None = None
         self.laser_intelligence_engine = LaserIntelligenceEngine()
         self.laser_intelligence_result: LaserIntelligenceResult | None = None
-        self._item_intelligence_results: dict[str, LaserIntelligenceResult] = {}
         self.raster_sources: list[RasterImageSource] = []
         self.original_raster_source: RasterImageSource | None = None
         self.autofit_result: AutoFitResult | None = None
@@ -176,6 +173,7 @@ class LaserControlWindow(
         self._refresh_gcode()
         self._draw_preview()
         self._sync_connection_indicator()
+        self._default_svg_placement = self._svg_placement_data()  # Startwerte fuer "Neues Projekt"
         self.diagnostic_log.event("App gestartet.")
         self.diagnostic_log.event(f"Diagnose-Log: {self.diagnostic_log.path}")
         self.log(f"Diagnose-Log aktiv: {self.diagnostic_log.path}")
@@ -353,6 +351,7 @@ class LaserControlWindow(
         self.object_table.itemChanged.connect(self._object_table_item_changed)
         self.object_table.itemSelectionChanged.connect(self._object_table_selection_changed)
         project_layout.addWidget(self.object_table)
+        self._build_project_edit_controls(project_layout)
         self.project_empty_state = QLabel("Noch keine Motive vorhanden.\nJetzt erstes Motiv importieren.")
         self.project_empty_state.setObjectName("projectEmptyState")
         self.project_empty_state.setWordWrap(True)

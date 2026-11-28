@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 from laser_control.gcode import CUT_MODE, ENGRAVE_MODE
-from laser_control.layers import LayerType, active_output_layers, build_default_layers
+from laser_control.layers import active_output_layers, build_default_layers
 from laser_control.material_db import delete_material, find_material, upsert_material
 from laser_control.models import MaterialProfile
 from laser_control.profiles import DEFAULT_PROFILES
@@ -50,15 +50,6 @@ class MaterialMixin:
         if not hasattr(self, "layer_panel"):
             return
         next_layers = build_default_layers(self._selected_profile(), self.operation_mode.currentText())
-        if getattr(self, "raster_sources", []):
-            raster_name = f"Raster: {self.raster_sources[0].file_name}"
-            for layer in next_layers:
-                if layer.layer_type == LayerType.ENGRAVE:
-                    layer.name = raster_name
-                    layer.enabled = True
-                    layer.visible = True
-                elif layer.layer_type == LayerType.CUT:
-                    layer.enabled = False
         if preserve_states:
             current_by_type = {layer.layer_type: layer for layer in self.layer_panel.layers()}
             for layer in next_layers:
