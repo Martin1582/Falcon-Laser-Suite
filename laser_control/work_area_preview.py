@@ -10,6 +10,21 @@ from laser_control.workspace_coordinates import WorkspaceCoordinateMapper
 from laser_control.ui_common import AUTO_FIT_MARGIN_MM, JOB_ORIGIN_CENTER, JOB_ORIGIN_LOWER_LEFT, MATERIAL_SHAPE_CIRCLE, MATERIAL_SHAPE_RECTANGLE
 
 
+def raster_source_image(source: RasterImageSource) -> QImage | None:
+    """Build a preview QImage from the tightly packed 8-bit grayscale pixels of a raster source.
+
+    Pillow's ``tobytes()`` has no row padding, while QImage without an explicit bytes-per-line
+    assumes rows aligned to 4 bytes. For widths not divisible by 4 (e.g. 1546 px) Qt would then
+    read past the end of the buffer and crash the app, so the row length is passed explicitly and
+    the buffer size is checked first. ``copy()`` detaches the image from the Python buffer.
+    """
+    width, height = source.pixel_width, source.pixel_height
+    data = source.grayscale_data
+    if not data or width <= 0 or height <= 0 or len(data) != width * height:
+        return None
+    return QImage(data, width, height, width, QImage.Format.Format_Grayscale8).copy()
+
+
 class WorkAreaPreview(QWidget):
     artwork_position_requested = Signal(float, float)
     artwork_selection_changed = Signal(bool)
@@ -417,9 +432,9 @@ class WorkAreaPreview(QWidget):
             y += spacing_mm
 
     def _draw_raster_source(self, painter: QPainter, source: RasterImageSource, mapper: WorkspaceCoordinateMapper) -> None:
-        if not source.grayscale_data:
+        image = raster_source_image(source)
+        if image is None:
             return
-        image = QImage(source.grayscale_data, source.pixel_width, source.pixel_height, QImage.Format.Format_Grayscale8).copy()
         if source.transform is not None:
             bounds = source.transform.bounds
             min_x, min_y, max_x, max_y = bounds.min_x, bounds.min_y, bounds.max_x, bounds.max_y
