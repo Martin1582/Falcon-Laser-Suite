@@ -10,6 +10,7 @@ from laser_control.layers import layer_from_dict, layer_to_dict
 from laser_control.job_history import export_job_history, import_job_history
 from laser_control.models import MaterialProfile
 from laser_control.project import laser_project_from_dict, load_project, project_to_dict, save_project
+from laser_control.services.assistant_service import is_test_matrix_gcode
 from laser_control.ui_common import AUTO_FIT_MARGIN_MM, JOB_ORIGIN_LOWER_LEFT, MATERIAL_SHAPE_RECTANGLE
 
 LEGACY_LAYER_REPAIR_MESSAGE = (
@@ -190,7 +191,10 @@ class ProjectMixin:
             # Legacy vector project without stored transform: place it once from the restored settings.
             self._apply_svg_placement()
         repair_notes = self._restore_layers(data)
-        self.gcode_text.setPlainText(data.get("gcode", ""))
+        gcode = data.get("gcode", "")
+        self.gcode_text.setPlainText(gcode)
+        # A saved test matrix is a generated job, also when the project still holds artwork items.
+        self._generated_job_name = "Testmatrix" if is_test_matrix_gcode(gcode) else None
         self._update_material_measurement_label()
         self._draw_preview()
         self.log(f"Projekt geladen: {path}")
@@ -218,9 +222,9 @@ class ProjectMixin:
     def _report_legacy_layer_repair(self, notes: list[str]) -> None:
         for note in notes:
             self.log(note)
-        if self.laser_project.items:
+        if self.laser_project.items and not self._generated_job_name:
             # Der gespeicherte G-Code beruht auf den alten Layern; Preflight und Start sollen den
-            # korrigierten nutzen. Ohne Motive (z. B. gespeicherte Testmatrix) bleibt er erhalten.
+            # korrigierten nutzen. Eine gespeicherte Testmatrix nutzt keine Layer und bleibt erhalten.
             self._refresh_gcode()
         QMessageBox.information(self, "Projekt laden", LEGACY_LAYER_REPAIR_MESSAGE.format(notes="\n\n".join(notes)))
 

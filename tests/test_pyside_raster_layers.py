@@ -346,3 +346,59 @@ def test_cut_mode_preflight_does_not_block_generated_test_matrix(window, monkeyp
     window._generate_test_matrix()
 
     assert not any("Schnitt-Layer" in blocker for blocker in _preflight_blockers(window))
+
+
+def _matrix_gcode(window) -> str:
+    window._generate_test_matrix()
+    return window.gcode_text.toPlainText()
+
+
+def test_load_legacy_project_with_artwork_keeps_saved_test_matrix(window, monkeypatch, tmp_path, info_dialogs) -> None:
+    """Testmatrix + Motive + Altlayer: die Reparatur darf die gespeicherte Matrix nicht ersetzen."""
+    project_path = _write_legacy_project(window, monkeypatch, tmp_path, mode_index=1)
+    data = json.loads(project_path.read_text(encoding="utf-8"))
+    data["gcode"] = _matrix_gcode(window)
+    project_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    assert data["laser_project"]["items"]
+
+    loaded, messages = _load(monkeypatch, project_path)
+    try:
+        assert loaded.gcode_text.toPlainText() == data["gcode"]
+        assert loaded._generated_job_name == "Testmatrix"
+        assert _layer(loaded, LayerType.CUT).enabled is True  # layers are still repaired
+        assert PARAMETERS_RESET_NOTE in messages
+        assert len(info_dialogs) == 1
+    finally:
+        loaded.close()
+
+
+def test_loaded_test_matrix_with_artwork_is_framed_as_generated_job(window, monkeypatch, tmp_path) -> None:
+    _import(window, monkeypatch, _svg(tmp_path))
+    window.svg_offset_x.setValue(250.0)
+    matrix = _matrix_gcode(window)
+    project_path = tmp_path / "matrix.laser.json"
+    _save(window, project_path)
+
+    loaded, _messages = _load(monkeypatch, project_path)
+    try:
+        assert loaded.gcode_text.toPlainText() == matrix
+        assert loaded._generated_job_name == "Testmatrix"
+        frame = loaded.get_transformed_bounds()
+        assert frame.max_x < 250.0  # matrix area, not the artwork placed at X 250
+        context = loaded._job_context(loaded.app_controller.controller, matrix)
+        assert context.source_type == "generated"
+    finally:
+        loaded.close()
+
+
+def test_loading_artwork_project_clears_a_previous_generated_job(window, monkeypatch, tmp_path) -> None:
+    _import(window, monkeypatch, _svg(tmp_path))
+    project_path = tmp_path / "artwork.laser.json"
+    _save(window, project_path)
+    _matrix_gcode(window)
+    assert window._generated_job_name == "Testmatrix"
+    monkeypatch.setattr("PySide6.QtWidgets.QFileDialog.getOpenFileName", lambda *_a, **_k: (str(project_path), ""))
+
+    window._load_project()
+
+    assert window._generated_job_name is None

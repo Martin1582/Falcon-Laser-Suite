@@ -35,7 +35,11 @@ class ProjectLifecycleMixin:
         if getattr(self, "worker_busy", False):
             return True
         controller = getattr(self, "app_controller", None)
-        return controller is not None and controller.machine_state.phase in LOCKED_PHASES
+        if controller is None:
+            return False
+        # The work-area trace runs as an uncounted worker while the phase stays idle, so it needs
+        # its own check: the machine is moving and project edits must wait.
+        return controller.machine_state.phase in LOCKED_PHASES or controller.is_work_area_trace_active()
 
     def _sync_project_edit_actions(self) -> None:
         actions = getattr(self, "project_edit_actions", None)

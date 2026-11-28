@@ -510,3 +510,31 @@ def test_load_project_drops_stale_item_caches(monkeypatch, tmp_path) -> None:
     assert set(window._item_intelligence_results) <= loaded_ids
     assert _all_cache_keys(window) <= loaded_ids | {"legacy"}
     window.close()
+
+
+def test_project_edit_locked_while_work_area_trace_runs(window, monkeypatch, tmp_path) -> None:
+    """The trace runs as an uncounted worker with phase idle; project edits must still be locked."""
+    _import(window, monkeypatch, _svg(tmp_path, "logo.svg"))
+    window.app_controller.switch_controller("Simulator")
+    window.app_controller.connect()
+    window.app_controller._set_work_area_trace_active(True)
+    try:
+        assert window.app_controller.machine_state.phase == MachinePhase.IDLE
+        assert not window.worker_busy
+        window._sync_position_indicator()  # what the 250 ms machine-state timer runs
+        actions = window.project_edit_actions
+        _forbid(monkeypatch, "confirm_remove_artwork")
+        _forbid(monkeypatch, "confirm_new_project")
+        items_before = list(window.laser_project.items)
+
+        window._remove_selected_artwork()
+        window._new_project()
+
+        assert not actions.remove_artwork_button.isEnabled()
+        assert not actions.new_project_button.isEnabled()
+        assert actions.remove_artwork_button.toolTip() == LOCKED_REASON
+        assert window.laser_project.items == items_before
+    finally:
+        window.app_controller._set_work_area_trace_active(False)
+    window._sync_position_indicator()
+    assert window.project_edit_actions.remove_artwork_button.isEnabled()

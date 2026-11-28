@@ -5,6 +5,15 @@ from laser_control.gcode_analysis import GCodeAnalysis
 from laser_control.job_history import JobHistoryEntry
 from laser_control.models import MaterialProfile
 
+# First line of every generated test matrix; lets a saved project recognise its G-code as a
+# generated job (the project file stores only the G-code text, not that it was generated).
+TEST_MATRIX_HEADER_PREFIX = "; Testmatrix fuer "
+
+
+def is_test_matrix_gcode(gcode: str) -> bool:
+    first_line = next((line.strip() for line in gcode.splitlines() if line.strip()), "")
+    return first_line.startswith(TEST_MATRIX_HEADER_PREFIX)
+
 
 @dataclass
 class AssistantAdvice:
@@ -51,7 +60,7 @@ class AssistantService:
         power_offsets = [-10, 0, 10]
         speed_factors = [1.25, 1.0, 0.75]
         lines = [
-            f"; Testmatrix fuer {material_name} ({operation_mode})",
+            f"{TEST_MATRIX_HEADER_PREFIX}{material_name} ({operation_mode})",
             "; Spalten: weniger / normal / mehr Leistung",
             "; Zeilen: schneller / normal / langsamer",
             "G21",

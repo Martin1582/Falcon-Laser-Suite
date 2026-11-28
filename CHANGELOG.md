@@ -49,8 +49,9 @@ All notable changes to this project are documented in this file.
   mode the engraving/cut flags) and the G-code is regenerated if the project has artwork. A dialog
   and the log list each correction and ask to check power, speed and passes of the layers, which
   the old raster import may have reset to the material values in either mode; the original values
-  were not saved. The file on disk only changes on the next save. A test matrix saved together
-  with artwork is replaced in the editor by the regenerated G-code.
+  were not saved. The file on disk only changes on the next save. A saved test matrix is kept
+  (also when the project holds artwork) and is treated as a generated job again after loading.
+- Project edits (remove artwork, new project) are also locked while the work-area trace runs.
 - Preflight blocks the start in cut mode when output layers are active but none of them is the
   cut layer (generated test matrices excepted).
 - Loading a project no longer keeps stale SVG analysis, optimization and laser intelligence caches of previously loaded items.
