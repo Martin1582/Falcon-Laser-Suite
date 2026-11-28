@@ -39,6 +39,20 @@ All notable changes to this project are documented in this file.
 - Material database storage now prefers the user AppData folder and falls back to the legacy project-local file.
 
 ### Fixed
+- Importing a PNG/JPG no longer rewires the layers: the engraving layer is no longer renamed to
+  "Raster: <file>" and switched on, the cut layer is no longer switched off, and user-set layer
+  values (passes, speed, power, fill, order) are kept. Before, an SVG in cut mode was output with
+  the engraving layer after a raster import, also after deactivating the raster or selecting the
+  SVG, and this state was saved with the project. Mode and material changes with a raster in the
+  project now enable the layer of the selected mode.
+- Projects saved with this faulty layer state are corrected when loaded (layer name, and in cut
+  mode the engraving/cut flags) and the G-code is regenerated if the project has artwork. A dialog
+  and the log list each correction and ask to check power, speed and passes of the layers, which
+  the old raster import may have reset to the material values in either mode; the original values
+  were not saved. The file on disk only changes on the next save. A test matrix saved together
+  with artwork is replaced in the editor by the regenerated G-code.
+- Preflight blocks the start in cut mode when output layers are active but none of them is the
+  cut layer (generated test matrices excepted).
 - Loading a project no longer keeps stale SVG analysis, optimization and laser intelligence caches of previously loaded items.
 - G-code motion validation now accepts `G0` travel moves.
 - G-code analysis no longer misclassifies `G21` as a `G2` arc command.

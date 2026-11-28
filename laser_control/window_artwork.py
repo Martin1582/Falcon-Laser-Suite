@@ -434,7 +434,6 @@ class ArtworkMixin:
             self._item_original_rasters[item.item_id] = source
             self._sync_transform_controls()
             self._set_svg_size_label(fitted_source.width_mm, fitted_source.height_mm, source_label=f"Raster: {source.file_name}")
-            self._sync_layers_from_controls(preserve_states=False)
             self._refresh_gcode()
             self._draw_preview()
             self._update_assistant_panel()

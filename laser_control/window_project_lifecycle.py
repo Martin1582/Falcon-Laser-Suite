@@ -4,7 +4,6 @@ Die Projektdaten aendert ausschliesslich der ProjectWorkspace; dieses Mixin sorg
 dass Auswahl, Vorschau, G-Code, Preflight und Buttons danach zueinander passen.
 """
 
-from laser_control.layers import LayerType, build_default_layers
 from laser_control.machine_state import MachinePhase
 from laser_control.project_edit_actions import (
     ProjectEditActions,
@@ -83,29 +82,10 @@ class ProjectLifecycleMixin:
             return
         removal = self.project_workspace.remove_item(item.item_id)
         self._select_artwork_item(removal.next_selected_id)
-        if removal.removed_item.is_raster:
-            self._sync_layers_after_raster_removal()
         self._refresh_after_project_change()
         self.log(f"Motiv entfernt: {item.name} ({len(self.laser_project.items)} Motive im Projekt)")
         if discards_matrix:
             self.log("Testmatrix verworfen.")
-
-    def _sync_layers_after_raster_removal(self) -> None:
-        """Layername "Raster: ..." entfernen und die Modus-Layer wieder freigeben.
-
-        Der Raster-Import erzwingt Gravur=an/Schnitt=aus; preserve_states wuerde das uebernehmen
-        und aus einem Schnitt-Job einen Gravur-Job machen. Leistung, Speed und Fill bleiben.
-        """
-        self._sync_layers_from_controls(preserve_states=True)
-        if self.raster_sources:
-            return  # Nachfolger ist selbst ein Raster: dessen Layerbelegung gilt weiter.
-        mode_layers = build_default_layers(self._selected_profile(), self.operation_mode.currentText())
-        enabled_by_type = {layer.layer_type: layer.enabled for layer in mode_layers}
-        layers = self.layer_panel.layers()
-        for layer in layers:
-            if layer.layer_type in (LayerType.ENGRAVE, LayerType.CUT):
-                layer.enabled = enabled_by_type[layer.layer_type]
-        self.layer_panel.set_layers(layers)
 
     def _new_project(self) -> None:
         if self._project_edit_locked():

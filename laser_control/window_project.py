@@ -5,11 +5,18 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 from laser_control.artwork_import import ArtworkSourceType, RasterImageSource, VectorArtworkSource
 from laser_control.artwork_scaling import AutoFitResult
 from laser_control.artwork_transform import normalize_paths, transform_paths
+from laser_control.layer_compat import repair_legacy_raster_layers
 from laser_control.layers import layer_from_dict, layer_to_dict
 from laser_control.job_history import export_job_history, import_job_history
 from laser_control.models import MaterialProfile
 from laser_control.project import laser_project_from_dict, load_project, project_to_dict, save_project
 from laser_control.ui_common import AUTO_FIT_MARGIN_MM, JOB_ORIGIN_LOWER_LEFT, MATERIAL_SHAPE_RECTANGLE
+
+LEGACY_LAYER_REPAIR_MESSAGE = (
+    "Dieses Projekt wurde mit einer aelteren Version gespeichert, in der ein Rasterbild die Layer "
+    "veraendert hat. Die Layer wurden beim Laden korrigiert:\n\n{notes}\n\n"
+    "Die Projektdatei bleibt unveraendert, bis Sie das Projekt speichern."
+)
 
 
 class ProjectMixin:
@@ -182,18 +189,40 @@ class ProjectMixin:
         elif not self.laser_project.items and self.original_imported_paths:
             # Legacy vector project without stored transform: place it once from the restored settings.
             self._apply_svg_placement()
-        if data.get("layers"):
-            try:
-                self.layer_panel.set_layers([layer_from_dict(item) for item in data.get("layers", [])])
-            except Exception as exc:  # noqa: BLE001 - load project should remain usable
-                self.log(f"Layerdaten konnten nicht geladen werden: {exc}")
-                self._sync_layers_from_controls(preserve_states=False)
-        else:
-            self._sync_layers_from_controls(preserve_states=False)
+        repair_notes = self._restore_layers(data)
         self.gcode_text.setPlainText(data.get("gcode", ""))
         self._update_material_measurement_label()
         self._draw_preview()
         self.log(f"Projekt geladen: {path}")
+        if repair_notes:
+            self._report_legacy_layer_repair(repair_notes)
+
+    def _restore_layers(self, data: dict) -> list[str]:
+        """Setzt die gespeicherten Layer; liefert Hinweise, falls ein Altprojekt korrigiert wurde.
+
+        Die Korrektur wirkt nur im Speicher. Die Datei aendert sich erst beim naechsten Speichern.
+        """
+        if not data.get("layers"):
+            self._sync_layers_from_controls(preserve_states=False)
+            return []
+        try:
+            layers = [layer_from_dict(item) for item in data.get("layers", [])]
+            repair = repair_legacy_raster_layers(layers, self.operation_mode.currentText())
+            self.layer_panel.set_layers(repair.layers)
+        except Exception as exc:  # noqa: BLE001 - load project should remain usable
+            self.log(f"Layerdaten konnten nicht geladen werden: {exc}")
+            self._sync_layers_from_controls(preserve_states=False)
+            return []
+        return repair.notes
+
+    def _report_legacy_layer_repair(self, notes: list[str]) -> None:
+        for note in notes:
+            self.log(note)
+        if self.laser_project.items:
+            # Der gespeicherte G-Code beruht auf den alten Layern; Preflight und Start sollen den
+            # korrigierten nutzen. Ohne Motive (z. B. gespeicherte Testmatrix) bleibt er erhalten.
+            self._refresh_gcode()
+        QMessageBox.information(self, "Projekt laden", LEGACY_LAYER_REPAIR_MESSAGE.format(notes="\n\n".join(notes)))
 
     def _restore_svg_placement(self, placement: dict) -> None:
         """Setzt die Platzierungs-Controls aus gespeicherten Daten (fehlende Schluessel: Defaults)."""

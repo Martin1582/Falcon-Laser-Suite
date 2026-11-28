@@ -86,6 +86,8 @@ Before every real engraving or cutting job:
 - Mode selection affects generated preview G-code for all current job types.
 - Parameters are remembered per mode (`Leistung`, `Geschwindigkeit`, `Durchgaenge`) for each selected material.
 - In cut mode, aggressive settings trigger an extra warning dialog before hardware start.
+- In cut mode, preflight blocks the start if output layers are active but the cut layer is not.
+- Raster images (PNG/JPG) do not change the layers; layers only control vector output.
 - Built-in material profiles are starter values researched from Creality Falcon/Falcon CR 10W material tables.
   Always run a small test matrix before using a new material batch.
 

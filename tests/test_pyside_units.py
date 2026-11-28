@@ -826,7 +826,9 @@ def test_pyside_imports_raster_as_blocked_preview_source(monkeypatch, tmp_path) 
     window._import_svg()
 
     assert window.raster_sources
-    assert "Raster" in window.layer_panel.layers()[0].name
+    # The raster does not take over a layer; it stays labelled in the size label instead.
+    assert [layer.name for layer in window.layer_panel.layers()] == ["Gravur", "Schnitt", "Markierung", "Hilfsebene"]
+    assert "Raster: photo.png" in window.svg_size_label.text()
     assert "Rastergravur-GCode" in window.gcode_text.toPlainText()
     assert "Rasterbild" in window.assistant_summary.toPlainText()
 

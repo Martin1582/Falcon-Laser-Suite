@@ -204,7 +204,7 @@ def test_remove_active_raster_unblocks_vector_job(window, monkeypatch, tmp_path)
     for path in (_svg(tmp_path, "logo.svg"), _png(tmp_path)):
         _import(window, monkeypatch, path)
     assert window.laser_project.items[1].is_raster
-    assert any(layer.name.startswith("Raster:") for layer in window.layer_panel.layers())
+    assert not any(layer.name.startswith("Raster:") for layer in window.layer_panel.layers())
     assert any("Aktives Rastermotiv" in blocker for blocker in _preflight_blockers(window))
     _answer(monkeypatch, "confirm_remove_artwork", True)
 
@@ -228,12 +228,12 @@ def test_remove_active_raster_unblocks_vector_job(window, monkeypatch, tmp_path)
 def test_remove_raster_restores_operation_mode_layers(
     window, monkeypatch, tmp_path, mode_index, expected_flags, layer_comment, laser_on, wrong_comment
 ) -> None:
-    """Regression: the raster import forces Gravur on/Schnitt off; removing it must undo that."""
+    """Regression: neither the raster import nor its removal may change the operation-mode layers."""
     window.operation_mode.setCurrentIndex(mode_index)
     _import(window, monkeypatch, _svg(tmp_path, "logo.svg"))
     assert {name: _layer_flags(window)[name] for name in expected_flags} == expected_flags
     _import(window, monkeypatch, _png(tmp_path, "p.png"))
-    assert _layer_flags(window)["Raster: p.png"] is True
+    assert {name: _layer_flags(window)[name] for name in expected_flags} == expected_flags
     layers = window.layer_panel.layers()
     cut_layer = next(layer for layer in layers if layer.name == "Schnitt")
     cut_layer.speed_mm_min = 777  # user tweak after the raster import must survive the removal

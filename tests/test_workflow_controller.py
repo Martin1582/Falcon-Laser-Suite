@@ -1,6 +1,6 @@
-from laser_control.gcode import ENGRAVE_MODE
+from laser_control.gcode import CUT_MODE, ENGRAVE_MODE
 from laser_control.fill_toolpath import build_layer_fill_toolpaths
-from laser_control.layers import LayerMode, build_default_layers
+from laser_control.layers import LayerMode, LayerType, build_default_layers
 from laser_control.machine_log import MachineActionLog, MachineLogStatus
 from laser_control.models import LaserState, MaterialProfile
 from laser_control.services.job_service import JobService
@@ -469,3 +469,59 @@ def test_preflight_blocks_active_raster_in_multi_artwork_job() -> None:
 
     assert not result.can_start
     assert any("Rastermotiv" in blocker for blocker in result.blockers)
+
+
+def _cut_mode_context(profile: MaterialProfile, cut_enabled: bool, source_type: str = "vector") -> JobContext:
+    layers = build_default_layers(profile, CUT_MODE)
+    for layer in layers:
+        if layer.layer_type == LayerType.ENGRAVE:
+            layer.enabled = True
+        elif layer.layer_type == LayerType.CUT:
+            layer.enabled = cut_enabled
+    return JobContext(
+        controller=Controller(True, True),
+        connection_mode="Simulator",
+        selected_port="",
+        machine_label="Simulator",
+        work_width_mm=100,
+        work_height_mm=80,
+        material_profile=profile,
+        operation_mode=CUT_MODE,
+        origin_label="Links unten",
+        gcode="G0 X0 Y0\nG1 X10 Y10 S400\nM5",
+        layers=layers,
+        machine_phase="idle",
+        source_name="logo.svg",
+        source_type=source_type,
+        active_artwork_count=1,
+        source_bounds_ok=True,
+    )
+
+
+def test_preflight_blocks_cut_mode_without_active_cut_layer() -> None:
+    profile = MaterialProfile("Holz", 40, 1200, 1)
+    workflow = WorkflowController(JobService(), MachineActionLog(), lambda _message: None)
+
+    result = workflow.prepare_preflight(_cut_mode_context(profile, cut_enabled=False))
+
+    assert not result.can_start
+    assert any("Kein Schnitt-Layer aktiv" in blocker for blocker in result.blockers)
+    assert not any("Kein Schnitt-Layer aktiv" in warning for warning in result.warnings)
+
+
+def test_preflight_accepts_cut_mode_with_active_cut_layer() -> None:
+    profile = MaterialProfile("Holz", 40, 1200, 1)
+    workflow = WorkflowController(JobService(), MachineActionLog(), lambda _message: None)
+
+    result = workflow.prepare_preflight(_cut_mode_context(profile, cut_enabled=True))
+
+    assert not any("Schnitt-Layer" in blocker for blocker in result.blockers)
+
+
+def test_preflight_skips_cut_layer_check_for_generated_test_matrix() -> None:
+    profile = MaterialProfile("Holz", 40, 1200, 1)
+    workflow = WorkflowController(JobService(), MachineActionLog(), lambda _message: None)
+
+    result = workflow.prepare_preflight(_cut_mode_context(profile, cut_enabled=False, source_type="generated"))
+
+    assert not any("Schnitt-Layer" in blocker for blocker in result.blockers)
