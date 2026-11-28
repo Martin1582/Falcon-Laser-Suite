@@ -7,19 +7,13 @@ All notable changes to this project are documented in this file.
 ### Removed
 - Deprecated Tkinter UI (`laser_control/app.py`); `main.py` with the PySide6 window is the only entry point.
 
-### Changed
-- Split the 4,600-line `pyside_app.py` into the window core plus feature mixins
-  (`window_machine`, `window_job`, `window_materials`, `window_artwork`, `window_project`,
-  `window_status`, `window_theme`), the `work_area_preview` widget and shared `ui_common` constants.
-  Behaviour and the `LaserControlWindow` API are unchanged.
-- Tests run against an isolated temporary storage (`tests/conftest.py`) and never touch the real
-  `%APPDATA%\Laser Control` data.
-
-### Changed
-- Switched the default app entry point from Tkinter to a new PySide6/Qt main window.
-- Updated startup dependency checks to install both `pyserial` and `PySide6`.
-
 ### Added
+- Remove the selected artwork from the object list via button or Delete key, with a confirmation
+  dialog. The source file stays on disk; an active generated test matrix is discarded with the item.
+- "New project" starts an empty project without restarting the app. It resets the loaded artwork,
+  project path, placement (auto/manual, margin, size, rotation, offsets), layers and material
+  measurement. The machine connection, machine and material profiles, work area, material selection,
+  power/speed/pass values, operation mode, material shape and job origin stay untouched.
 - Shared workflow helpers for cut-profile derivation and cut-parameter warnings.
 - PySide6 work area preview, G-code editor, log panel, project controls, material database controls, and simulator/GRBL controls.
 - Researched starter material profiles for common Falcon 10W engraving and cutting workflows.
@@ -33,10 +27,19 @@ All notable changes to this project are documented in this file.
 - GRBL status parsing for Idle/Hold/Alarm and reported machine position.
 
 ### Changed
+- Split the 4,600-line `pyside_app.py` into the window core plus feature mixins
+  (`window_machine`, `window_job`, `window_materials`, `window_artwork`, `window_project`,
+  `window_status`, `window_theme`), the `work_area_preview` widget and shared `ui_common` constants.
+  Behaviour and the `LaserControlWindow` API are unchanged.
+- Tests run against an isolated temporary storage (`tests/conftest.py`) and never touch the real
+  `%APPDATA%\Laser Control` data.
+- Switched the default app entry point from Tkinter to a new PySide6/Qt main window.
+- Updated startup dependency checks to install both `pyserial` and `PySide6`.
 - Project files now use version 2 and persist the selected operation mode while still loading v1 files.
 - Material database storage now prefers the user AppData folder and falls back to the legacy project-local file.
 
 ### Fixed
+- Loading a project no longer keeps stale SVG analysis, optimization and laser intelligence caches of previously loaded items.
 - G-code motion validation now accepts `G0` travel moves.
 - G-code analysis no longer misclassifies `G21` as a `G2` arc command.
 

@@ -115,6 +115,10 @@ Optional custom icon:
 - proportional SVG placement with automatic fit or manual width/offset
 - material measurement from two laser head positions
 - local material database for measured or manually entered sheets
+- remove the selected artwork from the object list (button or Delete key, with confirmation;
+  the source file stays on disk)
+- start a new project without restarting (machine connection, machine and material profiles
+  stay untouched)
 - scrollable control sidebar for smaller screens
 - basic work area preview
 - simulator mode for connect, home, jog, frame, start, pause, and stop actions
@@ -128,12 +132,12 @@ Optional custom icon:
 
 | Area | Modules |
 |---|---|
-| Main window | `pyside_app.py` (layout, preview wiring) plus feature mixins `window_machine`, `window_job`, `window_materials`, `window_artwork`, `window_project`, `window_status`, `window_theme` |
-| Widgets/panels | `work_area_preview`, `qt_panels`, `machine_panel`, `status_panel`, `console_log_panel`, `machine_profile_dialog` |
+| Main window | `pyside_app.py` (layout, preview wiring) plus feature mixins `window_machine`, `window_job`, `window_materials`, `window_artwork`, `window_project`, `window_status`, `window_theme`, `window_project_lifecycle` (remove item / new project), `window_item_state` |
+| Widgets/panels | `work_area_preview`, `qt_panels`, `machine_panel`, `status_panel`, `console_log_panel`, `machine_profile_dialog`, `project_edit_actions` (panel and confirmation dialogs) |
 | Controllers | `application_controller`, `workflow_controller`, `job_controller`, `machine_state`, `start_validation` |
 | Artwork & toolpaths | `svg_import`, `artwork_import`, `artwork_transform`, `artwork_scaling`, `fill_toolpath`, `svg_optimization`, `toolpath_optimizer` |
 | G-code & hardware | `gcode`, `gcode_analysis`, `serial_grbl`, `serial_executor`, `serial_autodetect`, `serial_consistency`, `laser` (simulator) |
-| Data | `project`, `material_db`, `job_history`, `machine_profiles`, `services/` |
+| Data | `project`, `project_workspace` (Qt-free project and artwork cache state), `material_db`, `job_history`, `machine_profiles`, `services/` |
 
 New UI behaviour belongs in the matching `window_*` mixin; machine and job logic belongs in the
 controllers/services so it stays testable without Qt.
